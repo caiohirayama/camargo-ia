@@ -1,0 +1,33 @@
+{
+  "name": "camargo-ia",
+  "version": "1.0.0",
+  "description": "Agente comercial da Camargo Atacarejo de Bebidas para WhatsApp",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node test/rag.test.js && node test/r2.test.js && node test/config.test.js && node test/log-context.test.js && node test/evolution-api.test.js && node test/architecture.test.js",
+    "test:postgres": "node test/postgres.integration.test.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "evolution-api",
+    "openai",
+    "express",
+    "atacarejo",
+    "bebidas",
+    "camargo"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1103.0",
+    "axios": "^1.19.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "morgan": "^1.11.0",
+    "openai": "^7.4.0",
+    "pg": "^8.23.0"
+  }
+}
