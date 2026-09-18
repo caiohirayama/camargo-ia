@@ -399,15 +399,17 @@ function phoneNumberVariants(digits) {
   return variants;
 }
 
-// Modo de teste: quando TEST_MODE_ALLOWED_NUMBER está configurado, só esse
-// número recebe respostas da IA — qualquer outro remetente é ignorado antes
+// Modo de teste: quando TEST_MODE_ALLOWED_NUMBER está configurado, só esses
+// números recebem respostas da IA — qualquer outro remetente é ignorado antes
 // de chegar na fila de conversa.
 function isTestModeAllowed(sender) {
-  if (!env.testModeAllowedNumber) return true;
+  if (!env.testModeAllowedNumbers.length) return true;
   if (typeof sender !== 'string') return false;
   const senderDigits = sender.split('@')[0].replace(/\D/g, '');
-  const allowedDigits = env.testModeAllowedNumber.replace(/\D/g, '');
-  return phoneNumberVariants(allowedDigits).has(senderDigits);
+  return env.testModeAllowedNumbers.some((number) => {
+    const allowedDigits = number.replace(/\D/g, '');
+    return phoneNumberVariants(allowedDigits).has(senderDigits);
+  });
 }
 
 function getWebhookMessageRoute(parsed) {

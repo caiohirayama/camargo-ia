@@ -48,7 +48,10 @@ const env = {
   r2Bucket: process.env.R2_BUCKET,
   r2PublicBaseUrl: process.env.R2_PUBLIC_BASE_URL,
   mediaMaxBytes: Number(process.env.MEDIA_MAX_BYTES) || 25 * 1024 * 1024,
-  testModeAllowedNumber: process.env.TEST_MODE_ALLOWED_NUMBER || null,
+  testModeAllowedNumbers: (process.env.TEST_MODE_ALLOWED_NUMBER || '')
+    .split(',')
+    .map((number) => number.trim())
+    .filter(Boolean),
   gestaoClickAccessToken: process.env.GESTAOCLICK_ACCESS_TOKEN || null,
   gestaoClickSecretToken: process.env.GESTAOCLICK_SECRET_TOKEN || null,
 };

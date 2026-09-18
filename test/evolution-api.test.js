@@ -9,7 +9,7 @@ const { parseIncomingPayload } = require('../src/utils/messageParser');
 const { getWebhookMessageRoute } = require('../src/controllers/webhookController');
 
 env.instanceName = 'camargo';
-env.testModeAllowedNumber = null;
+env.testModeAllowedNumbers = [];
 
 test('interpreta webhook MESSAGES_UPSERT da Evolution API', () => {
   const parsed = parseIncomingPayload({

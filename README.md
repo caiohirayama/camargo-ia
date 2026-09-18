@@ -102,9 +102,9 @@ O servidor usa a porta `3001` por padrão. Também são obrigatórios:
 
 Os endpoints `/test/set-webhook` e `/test/send-test` usam automaticamente `CAMARGO_INSTANCE_NAME`; não aceitam seleção de instância pelo corpo da requisição.
 
-### Modo de teste (restringir IA a um único número)
+### Modo de teste (restringir IA a números específicos)
 
-Defina `TEST_MODE_ALLOWED_NUMBER` (com DDI, ex: `5519978287957`) para que a IA só responda mensagens recebidas desse número; mensagens de qualquer outro remetente são ignoradas antes de entrar na fila de conversa (não geram resposta nem pausam/alteram estado). Deixe a variável vazia ou removida para atender todos os números normalmente.
+Defina `TEST_MODE_ALLOWED_NUMBER` (com DDI, ex: `5519978287957`, ou uma lista separada por vírgula, ex: `5519978287957,5511999999999`) para que a IA só responda mensagens recebidas desses números; mensagens de qualquer outro remetente são ignoradas antes de entrar na fila de conversa (não geram resposta nem pausam/alteram estado). Deixe a variável vazia ou removida para atender todos os números normalmente.
 
 ## Estrutura de IA
 
