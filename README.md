@@ -119,7 +119,8 @@ Defina `TEST_MODE_ALLOWED_NUMBER` (com DDI, ex: `5519978287957`) para que a IA s
 - `GET /health`: saúde do serviço;
 - `POST /webhook/evolution`: webhook principal, protegido por `WEBHOOK_SECRET`;
 - `GET /test/rag/status`: estado do índice RAG;
-- `POST /test/rag/search`: busca manual na base RAG.
+- `POST /test/rag/search`: busca manual na base RAG;
+- `POST /test/chat`: testa a IA isoladamente (sem WhatsApp/Evolution API e sem gravar nada no PostgreSQL) — corpo `{ "message": "texto", "history": [{ "role": "user"|"assistant", "content": "..." }] }`, `history` é opcional. Exige só `OPENAI_API_KEY` configurada; `GESTAOCLICK_ACCESS_TOKEN`/`GESTAOCLICK_SECRET_TOKEN` para testar consulta de produtos.
 
 ## Teste de integração PostgreSQL
 

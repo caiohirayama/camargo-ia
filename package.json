@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "node test/rag.test.js && node test/r2.test.js && node test/config.test.js && node test/log-context.test.js && node test/evolution-api.test.js && node test/architecture.test.js",
-    "test:postgres": "node test/postgres.integration.test.js"
+    "test:postgres": "node test/postgres.integration.test.js",
+    "chat:local": "node scripts/chat-local.js"
   },
   "keywords": [
     "whatsapp",

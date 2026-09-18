@@ -8,6 +8,37 @@ const { flowPrefix, errorSummary } = require('../utils/logContext');
 const GESTAOCLICK_API_BASE = 'https://api.gestaoclick.com/api';
 const MAX_RESULTADOS = 8;
 
+// O parâmetro `nome` da API do GestãoClick faz correspondência por substring
+// literal contra o nome cadastrado do produto (ex: "Skol 350ml FD/12"), sem
+// separar por palavra nem ignorar termos fora de ordem. O nome cadastrado
+// nunca inclui o tipo de recipiente/categoria genérica que o cliente usa no
+// WhatsApp (ex: "cerveja skol lata 350" não bate com nada, mas "skol 350"
+// bate) — por isso removemos esses termos antes de consultar.
+const FILLER_WORDS = new Set([
+  'cerveja', 'cervejas', 'refrigerante', 'refrigerantes', 'refri', 'bebida', 'bebidas',
+  'lata', 'latas', 'latinha', 'latinhas', 'garrafa', 'garrafas', 'vidro', 'pet',
+  'pacote', 'pacotes', 'unidade', 'unidades', 'un',
+  'de', 'da', 'do', 'das', 'dos', 'com', 'para', 'por', 'favor', 'e', 'a', 'o',
+]);
+
+function normalizeForCompare(word) {
+  return String(word || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+// Preserva grafia/acentos originais das palavras mantidas (o valor vai direto
+// pro parâmetro `nome` da API) e só usa a forma normalizada pra decidir o que
+// descartar.
+function stripFillerWords(termo) {
+  const original = String(termo || '').trim();
+  const palavras = original.split(/\s+/).filter(Boolean);
+  const filtradas = palavras.filter((palavra) => !FILLER_WORDS.has(normalizeForCompare(palavra)));
+  const resultado = filtradas.join(' ').trim();
+  return resultado || original;
+}
+
 function isProductsApiConfigured() {
   return Boolean(env.gestaoClickAccessToken && env.gestaoClickSecretToken);
 }
@@ -42,16 +73,25 @@ async function searchProducts({ termo, messageId = null }) {
     return { consultaRealizada: false, motivo: 'catálogo indisponível no momento' };
   }
 
-  try {
-    const response = await axios.get(`${GESTAOCLICK_API_BASE}/produtos`, {
-      params: { nome: termo, ativo: 1 },
-      headers: buildHeaders(),
-      timeout: 8000,
-    });
+  const termoLimpo = stripFillerWords(termo);
+  const tentativas = [...new Set([termoLimpo, termo.trim()])].filter(Boolean);
 
-    const produtos = (response.data?.data || []).slice(0, MAX_RESULTADOS).map(normalizeProduto);
-    console.log(`${prefix} [produtos] consulta realizada | termo="${termo}" | resultados=${produtos.length}`);
-    return { consultaRealizada: true, produtos };
+  try {
+    for (const tentativa of tentativas) {
+      const response = await axios.get(`${GESTAOCLICK_API_BASE}/produtos`, {
+        params: { nome: tentativa, ativo: 1 },
+        headers: buildHeaders(),
+        timeout: 8000,
+      });
+
+      const produtos = (response.data?.data || []).slice(0, MAX_RESULTADOS).map(normalizeProduto);
+      console.log(`${prefix} [produtos] consulta realizada | termo="${tentativa}" | resultados=${produtos.length}`);
+      if (produtos.length > 0) {
+        return { consultaRealizada: true, produtos };
+      }
+    }
+
+    return { consultaRealizada: true, produtos: [] };
   } catch (error) {
     console.error(`${prefix} [produtos] falha ao consultar API de produtos:`, errorSummary(error));
     return { consultaRealizada: false, motivo: 'falha ao consultar o catálogo' };

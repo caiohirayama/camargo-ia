@@ -1,5 +1,6 @@
 const evolutionService = require('../services/evolutionService');
 const ragService = require('../services/ragService');
+const aiService = require('../services/aiService');
 
 async function setWebhook(req, res) {
   try {
@@ -67,9 +68,50 @@ function searchRag(req, res) {
   }
 }
 
+function isValidHistory(history) {
+  return history.every(
+    (item) => item
+      && (item.role === 'user' || item.role === 'assistant')
+      && typeof item.content === 'string',
+  );
+}
+
+async function chat(req, res) {
+  try {
+    const { message, history } = req.body || {};
+
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Informe message como string.',
+      });
+    }
+
+    if (history !== undefined && (!Array.isArray(history) || !isValidHistory(history))) {
+      return res.status(400).json({
+        ok: false,
+        error: 'history deve ser uma lista de { role: "user"|"assistant", content: string }.',
+      });
+    }
+
+    const aiResult = await aiService.generateReply({
+      history: history || [],
+      userText: message,
+    });
+
+    return res.status(200).json({ ok: true, data: aiResult });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.response?.data || error.message,
+    });
+  }
+}
+
 module.exports = {
   setWebhook,
   sendTest,
   getRagStatus,
   searchRag,
+  chat,
 };

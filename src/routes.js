@@ -66,5 +66,6 @@ router.post('/test/set-webhook', testController.setWebhook);
 router.post('/test/send-test', testController.sendTest);
 router.get('/test/rag/status', testController.getRagStatus);
 router.post('/test/rag/search', testController.searchRag);
+router.post('/test/chat', testController.chat);
 
 module.exports = router;
