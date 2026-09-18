@@ -370,6 +370,10 @@ async function handleIncomingEvent(parsed) {
 
 async function handleEvolutionWebhook(req, res) {
   try {
+    console.log('URL:', req.originalUrl);
+    console.log('QUERY:', req.query);
+    console.log('TOKEN:', req.query.token)
+    
     const key = req.body?.data?.key || {};
     console.log(`${flowPrefix(key.id)} [webhook] recebido | evento=${req.body?.event || req.body?.type || 'desconhecido'} | instância=${req.body?.instance || 'ausente'} | fromMe=${Boolean(key.fromMe)}`);
     res.status(200).json({ ok: true });
