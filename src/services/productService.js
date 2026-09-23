@@ -62,6 +62,10 @@ function normalizeProduto(produto) {
     ativo: produto?.ativo === '1',
     estoque: Number(produto?.estoque) || 0,
     valor_venda: Number(produto?.valor_venda) || null,
+    // Necessário pra fechar um orçamento no GestãoClick (POST /orcamentos
+    // exige produto_id + variacao_id por item); todo produto tem ao menos
+    // uma variação, mesmo sem `possui_variacao`.
+    variacao_id: produto?.variacoes?.[0]?.variacao?.id || null,
   };
 }
 

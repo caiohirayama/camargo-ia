@@ -63,7 +63,7 @@ async function notifyAttendant({ sender, motivo, mensagem, pausado }) {
   }
 }
 
-async function notifyOrcamento({ sender, orcamento }) {
+async function notifyOrcamento({ sender, orcamento, pedidoGestaoClick }) {
   const botToken = env.telegramBotToken;
   const chatId = env.telegramChatId;
 
@@ -76,11 +76,13 @@ async function notifyOrcamento({ sender, orcamento }) {
   const linhasItens = itens.map((item) => `${item.quantidade} ${item.unidade} de ${item.produto} — R$ ${item.valor_total}`);
 
   const text = [
-    `🧾 Orçamento fechado pela IA`,
+    `🧾 Pedido confirmado pelo cliente`,
     `Cliente: ${orcamento?.nome_cliente || sender || 'desconhecido'}`,
     ...linhasItens,
     `Total: R$ ${orcamento?.valor_total_geral ?? '-'}`,
-    'Retirada no local; combinar pagamento e confirmar com o cliente.',
+    pedidoGestaoClick?.codigo
+      ? `Registrado no GestãoClick: orçamento nº ${pedidoGestaoClick.codigo}.`
+      : 'Retirada no local; combinar pagamento e confirmar com o cliente.',
   ].join('\n');
 
   try {

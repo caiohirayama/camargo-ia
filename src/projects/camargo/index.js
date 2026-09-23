@@ -19,9 +19,13 @@ const JSON_SCHEMA = {
           type: 'boolean',
           description: 'True somente quando um atendente humano precisa assumir a conversa (situações de transferência descritas no prompt). Pausa a IA para esse cliente.',
         },
+        confirmar_pedido: {
+          type: 'boolean',
+          description: 'True somente na mensagem em que o cliente acabou de confirmar de forma explícita e inequívoca um orçamento que você já apresentou antes nesta mesma conversa (ver "Confirmação do pedido" no prompt). Em qualquer outra mensagem, inclusive a que apresenta o resumo pela primeira vez, use false.',
+        },
         orcamento: {
           type: ['object', 'null'],
-          description: 'Preencha somente na mensagem em que você fecha o orçamento completo com o cliente (todos os itens, quantidades e preços já confirmados via consulta ao catálogo). Em qualquer outra mensagem, use null.',
+          description: 'Preencha na mensagem em que você apresenta o resumo completo do pedido ao cliente (todos os itens, quantidades e preços confirmados via consulta ao catálogo) e pergunta se pode confirmar; nessa mensagem confirmar_pedido é sempre false. Use null em qualquer outra mensagem, inclusive na mensagem em que o cliente confirma (confirmar_pedido true) — o resumo já foi enviado antes, não precisa repetir os itens.',
           additionalProperties: false,
           properties: {
             nome_cliente: {
@@ -36,12 +40,14 @@ const JSON_SCHEMA = {
                 additionalProperties: false,
                 properties: {
                   produto: { type: 'string', description: 'Nome do produto como retornado pela consulta ao catálogo.' },
+                  produto_id: { type: 'string', description: 'Campo id retornado por consultar_produtos para este item exato. Nunca invente; copie o valor exatamente como veio da consulta.' },
+                  variacao_id: { type: 'string', description: 'Campo variacao_id retornado por consultar_produtos para este item exato. Nunca invente; copie o valor exatamente como veio da consulta.' },
                   quantidade: { type: 'number', description: 'Quantidade solicitada pelo cliente.' },
                   unidade: { type: 'string', description: 'Unidade de venda (ex: caixa, fardo, unidade), conforme o catálogo.' },
                   valor_unitario: { type: 'number', description: 'Preço unitário conforme o catálogo, em reais.' },
                   valor_total: { type: 'number', description: 'quantidade × valor_unitario, em reais.' },
                 },
-                required: ['produto', 'quantidade', 'unidade', 'valor_unitario', 'valor_total'],
+                required: ['produto', 'produto_id', 'variacao_id', 'quantidade', 'unidade', 'valor_unitario', 'valor_total'],
               },
             },
             valor_total_geral: { type: 'number', description: 'Soma de valor_total de todos os itens, em reais.' },
@@ -49,7 +55,7 @@ const JSON_SCHEMA = {
           required: ['nome_cliente', 'itens', 'valor_total_geral'],
         },
       },
-      required: ['resposta_cliente', 'transferir_humano', 'orcamento'],
+      required: ['resposta_cliente', 'transferir_humano', 'confirmar_pedido', 'orcamento'],
     },
   },
 };

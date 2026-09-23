@@ -187,17 +187,19 @@ function parseStructuredReply(raw, projeto) {
     return {
       replyText: replyText || projeto.buildSafeFallbackReply(),
       transferToHuman: Boolean(parsed?.transferir_humano),
+      confirmarPedido: Boolean(parsed?.confirmar_pedido),
       orcamento: parsed?.orcamento && typeof parsed.orcamento === 'object' ? parsed.orcamento : null,
       rawContent: normalizedRaw,
     };
   } catch (_) {
     if (normalizedRaw && !normalizedRaw.startsWith('{')) {
-      return { replyText: stripEmDash(normalizedRaw), transferToHuman: false, orcamento: null, rawContent: normalizedRaw };
+      return { replyText: stripEmDash(normalizedRaw), transferToHuman: false, confirmarPedido: false, orcamento: null, rawContent: normalizedRaw };
     }
 
     return {
       replyText: projeto.buildSafeFallbackReply(),
       transferToHuman: true,
+      confirmarPedido: false,
       orcamento: null,
       rawContent: normalizedRaw,
     };

@@ -54,7 +54,7 @@ async function checkDatabaseConnection() {
   }
 
   await postgres.query(`
-    SELECT id, nome, telefone, sender, instancia, fbEventId, origem, createdAt, updatedAt
+    SELECT id, nome, telefone, sender, instancia, fbEventId, origem, gestaoClickClienteId, createdAt, updatedAt
     FROM Bot.Cliente
     LIMIT 0
   `);
@@ -71,6 +71,7 @@ async function checkDatabaseConnection() {
       has_table_privilege(current_user, 'bot.cliente', 'SELECT') AS read_customers,
       has_table_privilege(current_user, 'bot.cliente', 'INSERT') AS insert_customers,
       has_column_privilege(current_user, 'bot.cliente', 'iapausada', 'UPDATE') AS pause_customers,
+      has_column_privilege(current_user, 'bot.cliente', 'gestaoclickclienteid', 'UPDATE') AS link_gestaoclick_customers,
       has_table_privilege(current_user, 'bot.mensagens', 'SELECT') AS read_messages,
       has_table_privilege(current_user, 'bot.mensagens', 'INSERT') AS insert_messages,
       has_sequence_privilege(

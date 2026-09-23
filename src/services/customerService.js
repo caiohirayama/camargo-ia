@@ -12,6 +12,7 @@ const CUSTOMER_COLUMNS = `
   instancia,
   fbEventId AS "fbEventId",
   origem,
+  gestaoClickClienteId AS "gestaoClickClienteId",
   createdAt AS "createdAt",
   updatedAt AS "updatedAt"
 `;
@@ -200,6 +201,18 @@ async function resume(clienteId) {
   );
 }
 
+// Cacheia o id do cliente correspondente no GestãoClick, pra não recriar (ou
+// rebuscar por telefone) a cada pedido do mesmo contato. Ver orcamentoService.js.
+async function setGestaoClickClienteId(clienteId, gestaoClickClienteId) {
+  if (!clienteId || !gestaoClickClienteId) return;
+
+  const postgres = requirePool();
+  await postgres.query(
+    'UPDATE Bot.Cliente SET gestaoClickClienteId = $1, updatedAt = NOW() WHERE id = $2',
+    [gestaoClickClienteId, clienteId],
+  );
+}
+
 // Reconstrói o histórico de conversa a partir de Bot.Mensagens, para o
 // contexto da IA sobreviver a um restart do processo. Precisa ser chamado
 // antes de persistir as mensagens do turno atual, senão elas apareceriam
@@ -245,5 +258,6 @@ module.exports = {
   isPaused,
   pause,
   resume,
+  setGestaoClickClienteId,
   getRecentHistory,
 };

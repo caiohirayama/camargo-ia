@@ -13,7 +13,7 @@ Agente comercial da Camargo Atacarejo de Bebidas para atendimento pelo WhatsApp 
 
 As respostas são enviadas diretamente pela Evolution API e registradas em `Bot.Mensagens`; não há fila comercial nem persistência de estado de lead. A loja trabalha só com retirada no local: o orçamento fechado pela IA não reserva estoque nem horário, e o pedido é finalizado presencialmente na loja.
 
-O projeto não cria leads no CRM, não atualiza status comerciais e não grava resumos de atendimento. A única exceção de escrita fora de `INSERT` é a flag operacional `Bot.Cliente.iaPausada` (liga/desliga a resposta automática para aquele contato) — não é um status comercial, e `Bot.Mensagens` continua um log de auditoria imutável (nunca sofre `UPDATE` ou `DELETE`).
+O projeto não cria leads no CRM, não atualiza status comerciais e não grava resumos de atendimento no PostgreSQL — o orçamento em si (itens, valores) nunca é persistido ali, só passa em memória durante o turno e, se confirmado, vai para o GestãoClick (ver "Orçamento no GestãoClick"). As únicas exceções de escrita fora de `INSERT` em `Bot.Cliente` são a flag operacional `iaPausada` (liga/desliga a resposta automática para aquele contato) e `gestaoClickClienteId` (vínculo com o cliente correspondente no GestãoClick, pra não duplicar cadastro a cada pedido) — nenhuma das duas é um status comercial, e `Bot.Mensagens` continua um log de auditoria imutável (nunca sofre `UPDATE` ou `DELETE`).
 
 ## Requisitos
 
@@ -60,6 +60,16 @@ Sem as duas variáveis configuradas, a ferramenta fica indisponível e a IA trat
 
 Cada produto pode ter mais de um valor de venda cadastrado no GestãoClick (ex: faixas "Pequena quantidade"/"Ofertas"); `src/services/productService.js` só expõe à IA o `valor_venda` padrão (a faixa "Pequena quantidade"). Qualquer condição diferente (quantidade grande, negociação) é confirmada por um atendente, não decidida pela IA.
 
+### Orçamento no GestãoClick
+
+Depois que o cliente confirma explicitamente o resumo do pedido no WhatsApp (ver `camargo_agent_prompt.md`, seção "Confirmação do pedido"), `src/services/orcamentoService.js` registra o pedido de verdade no GestãoClick, usando as mesmas credenciais `GESTAOCLICK_ACCESS_TOKEN`/`GESTAOCLICK_SECRET_TOKEN`:
+
+1. Localiza o cliente no GestãoClick — usa `Bot.Cliente.gestaoClickClienteId` se já tiver sido resolvido antes; senão busca por telefone (`GET /clientes?telefone=`, sem o DDI) antes de criar um novo, pra não duplicar cadastro do mesmo contato.
+2. Cria o cliente (`POST /clientes`, sempre `tipo_pessoa: PF` + celular) só se a busca por telefone não encontrar nada.
+3. Cria o orçamento (`POST /orcamentos`) com os itens confirmados (`produto_id`, `variacao_id` e `valor_venda` vêm da última consulta ao catálogo feita nesta conversa — a API do GestãoClick não preenche o preço sozinha, um item sem `valor_venda` explícito entra com valor zero).
+
+Antes da confirmação explícita, o orçamento fica só em memória (`src/services/pendingOrderService.js`) — nada é criado no GestãoClick nem persistido no PostgreSQL enquanto o cliente não confirma.
+
 ## Criação do esquema
 
 Crie primeiro um banco PostgreSQL vazio. O projeto não mantém migrations numeradas; para uma instalação nova, aplique o schema operacional:
@@ -70,7 +80,7 @@ psql -v ON_ERROR_STOP=1 -d camargo -f sql/camargo_schema.sql
 
 Antes de aplicar em um banco já existente, transfira as credenciais de `Bot.Instancias` para o `.env` e faça backup. O schema remove explicitamente a tabela legada `Bot.Instancias` e mantém somente `Bot.Cliente` e `Bot.Mensagens`; não existe seed de instância.
 
-Em um banco já existente (sem a coluna `iaPausada`), basta reaplicar o schema: o `ALTER TABLE ... ADD COLUMN IF NOT EXISTS iaPausada` é idempotente e não afeta dados já gravados.
+Em um banco já existente (sem as colunas `iaPausada`/`gestaoClickClienteId`), basta reaplicar o schema: os `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` são idempotentes e não afetam dados já gravados. Aplique o schema (e o `GRANT` novo) antes de subir uma versão do app que já grave em `gestaoClickClienteId`, senão o boot falha na validação de permissões.
 
 ### Permissões do usuário da aplicação
 
@@ -80,11 +90,11 @@ Execute o schema com o usuário proprietário do banco. Depois conceda ao usuár
 GRANT CONNECT ON DATABASE camargo TO camargo_app;
 GRANT USAGE ON SCHEMA bot TO camargo_app;
 GRANT SELECT, INSERT ON TABLE bot.cliente, bot.mensagens TO camargo_app;
-GRANT UPDATE (iaPausada, updatedAt) ON TABLE bot.cliente TO camargo_app;
+GRANT UPDATE (iaPausada, gestaoClickClienteId, updatedAt) ON TABLE bot.cliente TO camargo_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA bot TO camargo_app;
 ```
 
-O `UPDATE` é restrito às colunas `iaPausada` e `updatedAt` — a aplicação nunca altera nome, telefone ou os demais dados do cliente, e `bot.mensagens` não recebe nenhum privilégio de `UPDATE`/`DELETE`.
+O `UPDATE` é restrito às colunas `iaPausada`, `gestaoClickClienteId` e `updatedAt` — a aplicação nunca altera nome, telefone ou os demais dados do cliente, e `bot.mensagens` não recebe nenhum privilégio de `UPDATE`/`DELETE`.
 
 Não use o superusuário do PostgreSQL na aplicação. Guarde a senha somente no `.env` ou no gerenciador de segredos do ambiente e faça rotação periódica.
 
@@ -112,6 +122,8 @@ Defina `TEST_MODE_ALLOWED_NUMBER` (com DDI, ex: `5519978287957`, ou uma lista se
 - `src/rag/knowledge/`: empresa, endereço, horário e políticas comerciais da Camargo (preço e estoque de produtos **não** ficam aqui, vêm da API de produtos);
 - `src/projects/camargo/`: schema de resposta e execução de cada turno;
 - `src/services/productService.js`: consulta ao catálogo real (preço, unidade, estoque);
+- `src/services/orcamentoService.js` + `src/services/gestaoClickService.js`: registram o pedido confirmado como cliente + orçamento no GestãoClick;
+- `src/services/pendingOrderService.js`: orçamento apresentado ao cliente, em memória, enquanto aguarda confirmação explícita;
 - `src/services/ragService.js`: indexação e busca lexical da base local.
 
 ## Endpoints úteis
