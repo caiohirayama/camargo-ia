@@ -4,10 +4,11 @@ const path = require('path');
 const env = require('../config/env');
 const registry = require('../projects/registry');
 const productService = require('./productService');
+const cartService = require('./cartService');
 const { flowPrefix, errorSummary } = require('../utils/logContext');
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
-const MAX_TOOL_ROUNDS = 3;
+const MAX_TOOL_ROUNDS = 4;
 
 const PRODUCT_SEARCH_TOOL = {
   type: 'function',
@@ -19,6 +20,7 @@ const PRODUCT_SEARCH_TOOL = {
       additionalProperties: false,
       properties: {
         termo: { type: 'string', description: 'Nome ou termo de busca do produto, como o cliente descreveu (ex: "cerveja skol lata", "coca 2 litros").' },
+        apenas_ofertas: { type: 'boolean', description: 'True somente quando o cliente pediu explicitamente produtos em oferta/promoção para esse termo. Retorna só os itens que têm oferta ativa, com o preço de oferta. Falso (padrão) usa o preço normal.' },
       },
       required: ['termo'],
     },
@@ -26,18 +28,102 @@ const PRODUCT_SEARCH_TOOL = {
 };
 
 async function executeProductSearchTool(rawArguments, messageId) {
-  let termo;
+  let args;
   try {
-    termo = JSON.parse(rawArguments || '{}')?.termo;
+    args = JSON.parse(rawArguments || '{}');
   } catch (_) {
     return { erro: 'argumentos inválidos' };
   }
 
+  const termo = args?.termo;
   if (!termo || typeof termo !== 'string') {
     return { erro: 'termo de busca é obrigatório' };
   }
 
-  return productService.searchProducts({ termo, messageId });
+  return productService.searchProducts({ termo, apenasOfertas: Boolean(args?.apenas_ofertas), messageId });
+}
+
+// O carrinho é a fonte real dos itens do pedido — nunca a memória da
+// conversa. Adicionar um item aqui, no momento exato em que o cliente
+// confirma, evita que a IA "esqueça" um item já confirmado ao montar o
+// resumo final mais tarde numa conversa longa.
+const ADD_CART_ITEM_TOOL = {
+  type: 'function',
+  function: {
+    name: 'adicionar_item_carrinho',
+    description: 'Adiciona ao carrinho um item que o cliente acabou de confirmar (produto exato e quantidade), usando os dados que consultar_produtos retornou nesta mesma conversa. Chame isso sempre que o cliente confirmar um item, imediatamente — nunca espere até o fim da lista.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        produto: { type: 'string', description: 'Nome do produto exatamente como retornado por consultar_produtos.' },
+        produto_id: { type: 'string', description: 'Campo id retornado por consultar_produtos para este item. Nunca invente.' },
+        variacao_id: { type: 'string', description: 'Campo variacao_id retornado por consultar_produtos para este item. Nunca invente.' },
+        quantidade: { type: 'number', description: 'Quantidade confirmada pelo cliente.' },
+        unidade: { type: 'string', description: 'Unidade de venda (ex: caixa, fardo, unidade), conforme o catálogo.' },
+        valor_unitario: { type: 'number', description: 'Preço unitário retornado por consultar_produtos nesta conversa (preço normal ou de oferta, conforme o que foi consultado).' },
+      },
+      required: ['produto', 'produto_id', 'variacao_id', 'quantidade', 'unidade', 'valor_unitario'],
+    },
+  },
+};
+
+const VIEW_CART_TOOL = {
+  type: 'function',
+  function: {
+    name: 'consultar_carrinho',
+    description: 'Retorna os itens já confirmados e adicionados ao carrinho nesta conversa, com o total. Chame sempre antes de apresentar o resumo final do pedido ao cliente — nunca monte esse resumo de memória.',
+    parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+  },
+};
+
+const CLEAR_CART_TOOL = {
+  type: 'function',
+  function: {
+    name: 'limpar_carrinho',
+    description: 'Esvazia o carrinho. Use somente quando o cliente pedir para tirar, trocar ou refazer os itens do pedido depois de já ter itens confirmados — em seguida, adicione de novo (com adicionar_item_carrinho) só os itens que o cliente ainda quer.',
+    parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+  },
+};
+
+function executeAddCartItemTool(rawArguments, clienteId) {
+  let args;
+  try {
+    args = JSON.parse(rawArguments || '{}');
+  } catch (_) {
+    return { erro: 'argumentos inválidos' };
+  }
+
+  const { produto, produto_id, variacao_id, quantidade, unidade, valor_unitario } = args || {};
+  const quantidadeNum = Number(quantidade);
+  const valorUnitarioNum = Number(valor_unitario);
+
+  if (!produto || !produto_id || !variacao_id || !unidade || !Number.isFinite(quantidadeNum) || !Number.isFinite(valorUnitarioNum)) {
+    return { erro: 'dados incompletos para adicionar ao carrinho' };
+  }
+
+  const item = {
+    produto,
+    produto_id: String(produto_id),
+    variacao_id: String(variacao_id),
+    quantidade: quantidadeNum,
+    unidade,
+    valor_unitario: valorUnitarioNum,
+    valor_total: quantidadeNum * valorUnitarioNum,
+  };
+
+  const itens = cartService.adicionarItem(clienteId, item);
+  return { itens, valor_total_geral: cartService.calcularTotal(itens) };
+}
+
+function executeViewCartTool(clienteId) {
+  const itens = cartService.getItens(clienteId);
+  return { itens, valor_total_geral: cartService.calcularTotal(itens) };
+}
+
+function executeClearCartTool(clienteId) {
+  cartService.limpar(clienteId);
+  return { itens: [], valor_total_geral: 0 };
 }
 
 function isOfficialOpenAiBaseUrl(baseUrl) {
@@ -222,7 +308,7 @@ function getCurrentWeekday() {
   }).format(new Date());
 }
 
-async function generateReply({ history = [], userText = '', messageId = null }) {
+async function generateReply({ history = [], userText = '', messageId = null, clienteId = null }) {
   const { client, model, provider } = getAiClientAndModel();
   const startedAt = Date.now();
   const prefix = flowPrefix(messageId);
@@ -263,7 +349,7 @@ async function generateReply({ history = [], userText = '', messageId = null }) 
     else request.reasoning_effort = 'low';
 
     if (provider === 'openai') request.response_format = projeto.jsonSchema;
-    if (allowTools) request.tools = [PRODUCT_SEARCH_TOOL];
+    if (allowTools) request.tools = [PRODUCT_SEARCH_TOOL, ADD_CART_ITEM_TOOL, VIEW_CART_TOOL, CLEAR_CART_TOOL];
 
     const response = await client.chat.completions.create(request);
     const choiceMessage = response.choices?.[0]?.message;
@@ -272,8 +358,22 @@ async function generateReply({ history = [], userText = '', messageId = null }) 
     if (toolCalls?.length) {
       messages.push(choiceMessage);
       for (const toolCall of toolCalls) {
-        console.log(`${prefix} [ia] chamando consultar_produtos | args=${toolCall.function?.arguments}`);
-        const result = await executeProductSearchTool(toolCall.function?.arguments, messageId);
+        const toolName = toolCall.function?.name;
+        console.log(`${prefix} [ia] chamando ${toolName} | args=${toolCall.function?.arguments}`);
+
+        let result;
+        if (toolName === 'consultar_produtos') {
+          result = await executeProductSearchTool(toolCall.function?.arguments, messageId);
+        } else if (toolName === 'adicionar_item_carrinho') {
+          result = executeAddCartItemTool(toolCall.function?.arguments, clienteId);
+        } else if (toolName === 'consultar_carrinho') {
+          result = executeViewCartTool(clienteId);
+        } else if (toolName === 'limpar_carrinho') {
+          result = executeClearCartTool(clienteId);
+        } else {
+          result = { erro: 'ferramenta desconhecida' };
+        }
+
         messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) });
       }
       continue;

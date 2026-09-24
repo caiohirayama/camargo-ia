@@ -52,17 +52,36 @@ function buildHeaders() {
 }
 
 // O GestãoClick permite cadastrar mais de um valor de venda por produto (ex:
-// faixas "Pequena quantidade"/"Ofertas"), mas quem decide se um pedido tem
-// direito a uma condição diferente da padrão é um atendente, não a IA — por
-// isso só expomos o valor_venda padrão (a faixa "Pequena quantidade").
-function normalizeProduto(produto) {
+// faixas "Pequena quantidade"/"Ofertas"). "Pequena quantidade" é a faixa
+// padrão sempre usada. A faixa "Ofertas" só existe de verdade quando o
+// Felipe cadastra um valor > 0 nela pra aquele produto especificamente
+// (quando não está em oferta, o valor cadastrado ali é 0.00) — por isso um
+// valor de oferta de 0 conta como "sem oferta ativa", não como preço grátis.
+function valorPorFaixa(produto, nomeFaixa) {
+  const valores = Array.isArray(produto?.valores) ? produto.valores : [];
+  const alvo = valores.find((item) => normalizeForCompare(item?.nome_tipo) === normalizeForCompare(nomeFaixa));
+  const valor = Number(alvo?.valor_venda);
+  return Number.isFinite(valor) && valor > 0 ? valor : null;
+}
+
+// Retorna null quando `apenasOfertas` é pedido mas esse produto não tem
+// oferta ativa — o item some da lista de resultados em vez de aparecer com
+// preço zerado ou com o preço padrão disfarçado de oferta.
+function normalizeProduto(produto, { apenasOfertas = false } = {}) {
+  const valorOferta = valorPorFaixa(produto, 'Ofertas');
+
+  if (apenasOfertas && valorOferta === null) {
+    return null;
+  }
+
   return {
     id: produto?.id,
     nome: produto?.nome,
     codigo: produto?.codigo_interno,
     ativo: produto?.ativo === '1',
     estoque: Number(produto?.estoque) || 0,
-    valor_venda: Number(produto?.valor_venda) || null,
+    valor_venda: apenasOfertas ? valorOferta : (Number(produto?.valor_venda) || null),
+    em_oferta: apenasOfertas,
     // Necessário pra fechar um orçamento no GestãoClick (POST /orcamentos
     // exige produto_id + variacao_id por item); todo produto tem ao menos
     // uma variação, mesmo sem `possui_variacao`.
@@ -70,7 +89,7 @@ function normalizeProduto(produto) {
   };
 }
 
-async function searchProducts({ termo, messageId = null }) {
+async function searchProducts({ termo, apenasOfertas = false, messageId = null }) {
   const prefix = flowPrefix(messageId);
 
   if (!isProductsApiConfigured()) {
@@ -89,8 +108,11 @@ async function searchProducts({ termo, messageId = null }) {
         timeout: 8000,
       });
 
-      const produtos = (response.data?.data || []).slice(0, MAX_RESULTADOS).map(normalizeProduto);
-      console.log(`${prefix} [produtos] consulta realizada | termo="${tentativa}" | resultados=${produtos.length}`);
+      const produtos = (response.data?.data || [])
+        .map((produto) => normalizeProduto(produto, { apenasOfertas }))
+        .filter(Boolean)
+        .slice(0, MAX_RESULTADOS);
+      console.log(`${prefix} [produtos] consulta realizada | termo="${tentativa}" | apenasOfertas=${apenasOfertas} | resultados=${produtos.length}`);
       if (produtos.length > 0) {
         return { consultaRealizada: true, produtos };
       }

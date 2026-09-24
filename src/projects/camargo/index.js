@@ -25,34 +25,15 @@ const JSON_SCHEMA = {
         },
         orcamento: {
           type: ['object', 'null'],
-          description: 'Preencha na mensagem em que você apresenta o resumo completo do pedido ao cliente (todos os itens, quantidades e preços confirmados via consulta ao catálogo) e pergunta se pode confirmar; nessa mensagem confirmar_pedido é sempre false. Use null em qualquer outra mensagem, inclusive na mensagem em que o cliente confirma (confirmar_pedido true) — o resumo já foi enviado antes, não precisa repetir os itens.',
+          description: 'Preencha (só com nome_cliente) na mensagem em que você apresenta o resumo do pedido ao cliente e pergunta se pode confirmar — sempre depois de chamar consultar_carrinho nesta mesma resposta, para pegar os itens reais (nunca monte a lista de memória). Nessa mensagem confirmar_pedido é sempre false. Use null em qualquer outra mensagem, inclusive na mensagem em que o cliente confirma (confirmar_pedido true).',
           additionalProperties: false,
           properties: {
             nome_cliente: {
               type: ['string', 'null'],
               description: 'Nome do cliente, se ele informou em algum momento da conversa. Use null se não foi informado.',
             },
-            itens: {
-              type: 'array',
-              description: 'Itens do orçamento, na ordem em que foram confirmados.',
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  produto: { type: 'string', description: 'Nome do produto como retornado pela consulta ao catálogo.' },
-                  produto_id: { type: 'string', description: 'Campo id retornado por consultar_produtos para este item exato. Nunca invente; copie o valor exatamente como veio da consulta.' },
-                  variacao_id: { type: 'string', description: 'Campo variacao_id retornado por consultar_produtos para este item exato. Nunca invente; copie o valor exatamente como veio da consulta.' },
-                  quantidade: { type: 'number', description: 'Quantidade solicitada pelo cliente.' },
-                  unidade: { type: 'string', description: 'Unidade de venda (ex: caixa, fardo, unidade), conforme o catálogo.' },
-                  valor_unitario: { type: 'number', description: 'Preço unitário conforme o catálogo, em reais.' },
-                  valor_total: { type: 'number', description: 'quantidade × valor_unitario, em reais.' },
-                },
-                required: ['produto', 'produto_id', 'variacao_id', 'quantidade', 'unidade', 'valor_unitario', 'valor_total'],
-              },
-            },
-            valor_total_geral: { type: 'number', description: 'Soma de valor_total de todos os itens, em reais.' },
           },
-          required: ['nome_cliente', 'itens', 'valor_total_geral'],
+          required: ['nome_cliente'],
         },
       },
       required: ['resposta_cliente', 'transferir_humano', 'confirmar_pedido', 'orcamento'],

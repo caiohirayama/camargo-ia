@@ -2,7 +2,7 @@ const customerService = require('../../services/customerService');
 const evolutionService = require('../../services/evolutionService');
 const telegramService = require('../../services/telegramService');
 const orcamentoService = require('../../services/orcamentoService');
-const pendingOrderService = require('../../services/pendingOrderService');
+const cartService = require('../../services/cartService');
 const { flowPrefix, maskJid, errorSummary } = require('../../utils/logContext');
 
 // A IA separa partes que devem virar bolhas distintas no WhatsApp com uma
@@ -24,6 +24,7 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
     userText: combinedText,
     instanceName,
     messageId,
+    clienteId: cliente?.id,
   });
 
   let reply = aiResult?.replyText?.trim() || 'Só um momento, já te retorno com uma resposta certinha.';
@@ -34,17 +35,25 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
     return;
   }
 
-  // O orçamento só é apresentado (confirmarPedido false) ou confirmado
-  // (confirmarPedido true) nunca os dois na mesma mensagem — ver
-  // camargo_agent_prompt.md, seção "Confirmação do pedido". Só na confirmação
-  // é que o cliente/orçamento realmente entram no GestãoClick.
+  // O carrinho (cartService) é a fonte real dos itens — a IA adiciona cada
+  // item confirmado via tool call durante a conversa (aiService.js), nunca
+  // reconstrói a lista de memória. O orçamento só é apresentado
+  // (confirmarPedido false) ou confirmado (confirmarPedido true), nunca os
+  // dois na mesma mensagem — ver camargo_agent_prompt.md, seção "Confirmação
+  // do pedido". Só na confirmação é que o cliente/orçamento realmente entram
+  // no GestãoClick.
   let pedidoRegistrado = null;
   let orcamentoConfirmado = null;
   let falhaAoRegistrarPedido = false;
 
   if (aiResult?.confirmarPedido) {
-    const orcamentoPendente = pendingOrderService.get(cliente?.id);
-    if (orcamentoPendente) {
+    const itensCarrinho = cartService.getItens(cliente?.id);
+    if (itensCarrinho.length > 0) {
+      const orcamentoPendente = {
+        nome_cliente: cartService.getNomeCliente(cliente?.id),
+        itens: itensCarrinho,
+        valor_total_geral: cartService.calcularTotal(itensCarrinho),
+      };
       try {
         pedidoRegistrado = await orcamentoService.registrarPedidoConfirmado({
           cliente,
@@ -52,22 +61,22 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
           messageId,
         });
         orcamentoConfirmado = orcamentoPendente;
-        pendingOrderService.clear(cliente?.id);
+        cartService.limpar(cliente?.id);
       } catch (error) {
         falhaAoRegistrarPedido = true;
         console.error(`${flowPrefix(messageId)} [camargo] falha ao registrar pedido confirmado no GestãoClick:`, errorSummary(error));
       }
     } else {
       falhaAoRegistrarPedido = true;
-      console.warn(`${flowPrefix(messageId)} [camargo] cliente confirmou mas não havia orçamento pendente em memória (ex: restart do processo no meio da espera)`);
+      console.warn(`${flowPrefix(messageId)} [camargo] cliente confirmou mas o carrinho está vazio (ex: restart do processo no meio da espera)`);
     }
 
     if (falhaAoRegistrarPedido) {
       reply = 'Só um momento, já te retorno com uma resposta certinha.';
       transferirHumano = true;
     }
-  } else if (aiResult?.orcamento) {
-    pendingOrderService.save(cliente?.id, aiResult.orcamento);
+  } else if (aiResult?.orcamento?.nome_cliente) {
+    cartService.definirNomeCliente(cliente?.id, aiResult.orcamento.nome_cliente);
   }
 
   if (transferirHumano) {

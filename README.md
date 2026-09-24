@@ -59,7 +59,7 @@ Gere os dois em **Configurações > Integração via API** no GestãoClick. O Se
 
 Sem as duas variáveis configuradas, a ferramenta fica indisponível e a IA trata toda pergunta de preço/produto como "catálogo indisponível", encaminhando para um atendente (`transferir_humano: true`) em vez de inventar valores.
 
-Cada produto pode ter mais de um valor de venda cadastrado no GestãoClick (ex: faixas "Pequena quantidade"/"Ofertas"); `src/services/productService.js` só expõe à IA o `valor_venda` padrão (a faixa "Pequena quantidade"). Qualquer condição diferente (quantidade grande, negociação) é confirmada por um atendente, não decidida pela IA.
+Cada produto pode ter mais de um valor de venda cadastrado no GestãoClick (faixas "Pequena quantidade"/"Ofertas"). `src/services/productService.js` usa "Pequena quantidade" como padrão sempre; só consulta a faixa "Ofertas" quando o cliente pede oferta/promoção explicitamente (`consultar_produtos` com `apenas_ofertas: true`), e só retorna o item se essa faixa tiver um valor cadastrado maior que zero — quando o produto não está em oferta, o valor da faixa "Ofertas" no GestãoClick fica em 0.00, e nesse caso o item não aparece na busca por oferta (não vaza um preço zerado nem cai de volta pro preço normal disfarçado de oferta). Qualquer outra condição diferente (quantidade grande, negociação) é confirmada por um atendente, não decidida pela IA.
 
 ### Orçamento no GestãoClick
 
@@ -69,7 +69,7 @@ Depois que o cliente confirma explicitamente o resumo do pedido no WhatsApp (ver
 2. Cria o cliente (`POST /clientes`, sempre `tipo_pessoa: PF` + celular) só se a busca por telefone não encontrar nada.
 3. Cria o orçamento (`POST /orcamentos`) com os itens confirmados (`produto_id`, `variacao_id` e `valor_venda` vêm da última consulta ao catálogo feita nesta conversa — a API do GestãoClick não preenche o preço sozinha, um item sem `valor_venda` explícito entra com valor zero).
 
-Antes da confirmação explícita, o orçamento fica só em memória (`src/services/pendingOrderService.js`) — nada é criado no GestãoClick nem persistido no PostgreSQL enquanto o cliente não confirma.
+Os itens do pedido vivem num carrinho em memória (`src/services/cartService.js`), nunca na memória da conversa: a IA adiciona cada item confirmado via tool call (`adicionar_item_carrinho`) no momento exato da confirmação, e sempre relê o carrinho real (`consultar_carrinho`) antes de apresentar o resumo final — nunca reconstrói a lista a partir do histórico de texto. Antes da confirmação explícita, nada é criado no GestãoClick nem persistido no PostgreSQL.
 
 ## Criação do esquema
 
@@ -128,7 +128,7 @@ Defina `TEST_MODE_ALLOWED_NUMBER` (com DDI, ex: `5519978287957`, ou uma lista se
 - `src/projects/camargo/`: schema de resposta e execução de cada turno;
 - `src/services/productService.js`: consulta ao catálogo real (preço, unidade, estoque);
 - `src/services/orcamentoService.js` + `src/services/gestaoClickService.js`: registram o pedido confirmado como cliente + orçamento no GestãoClick;
-- `src/services/pendingOrderService.js`: orçamento apresentado ao cliente, em memória, enquanto aguarda confirmação explícita;
+- `src/services/cartService.js`: carrinho de itens confirmados, em memória, fonte real usada tanto no resumo quanto na confirmação — nunca a memória da conversa;
 - `src/services/ragService.js`: indexação e busca lexical da base local.
 
 ## Endpoints úteis
