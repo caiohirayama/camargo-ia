@@ -18,6 +18,7 @@ const FILLER_WORDS = new Set([
   'cerveja', 'cervejas', 'refrigerante', 'refrigerantes', 'refri', 'bebida', 'bebidas',
   'lata', 'latas', 'latinha', 'latinhas', 'garrafa', 'garrafas', 'vidro', 'pet',
   'pacote', 'pacotes', 'unidade', 'unidades', 'un',
+  'fardo', 'fardos', 'caixa', 'caixas', 'engradado', 'engradados',
   'de', 'da', 'do', 'das', 'dos', 'com', 'para', 'por', 'favor', 'e', 'a', 'o',
 ]);
 
