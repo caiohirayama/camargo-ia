@@ -54,6 +54,7 @@ const env = {
     .filter(Boolean),
   gestaoClickAccessToken: process.env.GESTAOCLICK_ACCESS_TOKEN || null,
   gestaoClickSecretToken: process.env.GESTAOCLICK_SECRET_TOKEN || null,
+  pauseExpirationHours: envNumber('PAUSE_EXPIRATION_HOURS', 12),
 };
 
 function validateUrl(name, value) {

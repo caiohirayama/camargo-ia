@@ -201,6 +201,40 @@ async function resume(clienteId) {
   );
 }
 
+async function getLastMessageAt(clienteId) {
+  if (!clienteId) return null;
+
+  const postgres = requirePool();
+  const result = await postgres.query(
+    'SELECT MAX(createdAt) AS "lastMessageAt" FROM Bot.Mensagens WHERE clienteId = $1',
+    [clienteId],
+  );
+  return result.rows[0]?.lastMessageAt || null;
+}
+
+// A pausa existe pra proteger uma conversa em andamento com atendente, não
+// pra silenciar o cliente pra sempre — compra é recorrente, então um cliente
+// não pode voltar dias depois e continuar sem resposta só porque ficou
+// pausado uma vez. Se ninguém (cliente ou atendente) mandou mensagem há mais
+// que env.pauseExpirationHours, a pausa expira sozinha na próxima mensagem
+// recebida, sem precisar de ação manual.
+async function isPauseInEffect(clienteId) {
+  const paused = await isPaused(clienteId);
+  if (!paused) return false;
+
+  const lastMessageAt = await getLastMessageAt(clienteId);
+  const limiteMs = env.pauseExpirationHours * 60 * 60 * 1000;
+  const expirou = !lastMessageAt || (Date.now() - new Date(lastMessageAt).getTime()) > limiteMs;
+
+  if (expirou) {
+    await resume(clienteId);
+    console.log(`[postgres] pausa expirada após ${env.pauseExpirationHours}h de silêncio, IA reativada automaticamente | clienteId=${clienteId}`);
+    return false;
+  }
+
+  return true;
+}
+
 // Cacheia o id do cliente correspondente no GestãoClick, pra não recriar (ou
 // rebuscar por telefone) a cada pedido do mesmo contato. Ver orcamentoService.js.
 async function setGestaoClickClienteId(clienteId, gestaoClickClienteId) {
@@ -256,6 +290,7 @@ module.exports = {
   saveOutgoingMessage,
   hasRepliedBefore,
   isPaused,
+  isPauseInEffect,
   pause,
   resume,
   setGestaoClickClienteId,

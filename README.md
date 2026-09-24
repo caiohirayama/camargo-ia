@@ -9,7 +9,8 @@ Agente comercial da Camargo Atacarejo de Bebidas para atendimento pelo WhatsApp 
 - responder dúvidas com prompt operacional e base RAG separados;
 - transcrever áudios e analisar imagens enviadas pelo cliente (produtos, rótulos, embalagens);
 - consultar o catálogo real (preço, unidade de venda e disponibilidade) via `consultar_produtos` antes de informar qualquer valor, e montar o orçamento com os itens confirmados;
-- pausar a IA quando um atendente assumir ou quando o atendimento exigir transferência, e retomar o histórico de conversa a partir de `Bot.Mensagens` — ambos sobrevivem a um restart do processo.
+- pausar a IA quando um atendente assumir ou quando o atendimento exigir transferência, e retomar o histórico de conversa a partir de `Bot.Mensagens` — ambos sobrevivem a um restart do processo;
+- reativar a IA sozinha (sem ação manual) quando o cliente volta a escrever depois de `PAUSE_EXPIRATION_HOURS` sem nenhuma mensagem — a pausa protege uma conversa em andamento com atendente, não silencia o cliente para sempre (compra é recorrente).
 
 As respostas são enviadas diretamente pela Evolution API e registradas em `Bot.Mensagens`; não há fila comercial nem persistência de estado de lead. A loja trabalha só com retirada no local: o orçamento fechado pela IA não reserva estoque nem horário, e o pedido é finalizado presencialmente na loja.
 
@@ -111,6 +112,10 @@ O servidor usa a porta `3001` por padrão. Também são obrigatórios:
 - `TEST_API_KEY`: chave exigida no header `x-api-key` em todos os endpoints `/test/*`.
 
 Os endpoints `/test/set-webhook` e `/test/send-test` usam automaticamente `CAMARGO_INSTANCE_NAME`; não aceitam seleção de instância pelo corpo da requisição.
+
+### Pausa da IA e expiração automática
+
+Quando um atendente manda mensagem manualmente pelo número conectado, o cliente manda uma mensagem interativa (botão/lista) ou a IA marca `transferir_humano: true`, a IA para de responder aquele cliente (`Bot.Cliente.iaPausada = true`). Essa pausa não é permanente: se ninguém — nem cliente, nem atendente — mandar mensagem por `PAUSE_EXPIRATION_HOURS` (padrão 12h), a próxima mensagem do cliente já reativa a IA sozinha, sem precisar de intervenção manual. Isso existe porque a compra é recorrente: um cliente não pode voltar dias depois e continuar sem resposta só porque ficou pausado uma vez por qualquer motivo pontual.
 
 ### Modo de teste (restringir IA a números específicos)
 

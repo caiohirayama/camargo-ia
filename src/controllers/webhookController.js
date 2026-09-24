@@ -102,7 +102,7 @@ async function processPendingConversation(instanceName, sender, pendingMessages)
     origem: ctwaSource,
   });
 
-  const aiActive = !(await customerService.isPaused(cliente?.id));
+  const aiActive = !(await customerService.isPauseInEffect(cliente?.id));
   console.log(`${prefix} [cliente] resolvido | clienteId=${cliente?.id || 'não encontrado'} | iaAtiva=${aiActive}`);
 
   // Precisa ser buscado antes de persistir as mensagens deste lote logo abaixo,
