@@ -5,6 +5,9 @@ const env = require('../config/env');
 const registry = require('../projects/registry');
 const productService = require('./productService');
 const cartService = require('./cartService');
+const orcamentoService = require('./orcamentoService');
+const cnpjService = require('./cnpjService');
+const documento = require('../utils/documento');
 const { flowPrefix, errorSummary } = require('../utils/logContext');
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -72,7 +75,7 @@ const VIEW_CART_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_carrinho',
-    description: 'Retorna os itens já confirmados e adicionados ao carrinho nesta conversa, com o total. Chame sempre antes de apresentar o resumo final do pedido ao cliente — nunca monte esse resumo de memória.',
+    description: 'Retorna os itens já confirmados e adicionados ao carrinho nesta conversa, com o total, e se ainda faltam os dados de cadastro do cliente (dados_cadastro_pendentes). Chame sempre antes de apresentar o resumo final do pedido ao cliente — nunca monte esse resumo de memória.',
     parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
   },
 };
@@ -85,6 +88,73 @@ const CLEAR_CART_TOOL = {
     parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
   },
 };
+
+// Cliente novo no GestãoClick só é cadastrado com tipo de pessoa e
+// documento: PF com nome + CPF, PJ com CNPJ (razão social vem da consulta
+// ao CNPJ). Validação dos dígitos verificadores fica aqui, no servidor.
+const REGISTER_CUSTOMER_DATA_TOOL = {
+  type: 'function',
+  function: {
+    name: 'registrar_dados_cliente',
+    description: 'Registra os dados de cadastro do cliente, informados por ele nesta conversa, necessários antes de fechar o pedido quando consultar_carrinho retorna dados_cadastro_pendentes: true. Pessoa física: nome completo e CPF. Pessoa jurídica: CNPJ. Nunca invente nem complete dados que o cliente não informou.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        tipo_pessoa: { type: 'string', enum: ['PF', 'PJ'], description: 'PF para pessoa física, PJ para pessoa jurídica (empresa), conforme o cliente respondeu.' },
+        nome: { type: ['string', 'null'], description: 'Pessoa física: nome completo informado pelo cliente. Pessoa jurídica: null.' },
+        cpf: { type: ['string', 'null'], description: 'Pessoa física: CPF informado pelo cliente. Pessoa jurídica: null.' },
+        cnpj: { type: ['string', 'null'], description: 'Pessoa jurídica: CNPJ informado pelo cliente. Pessoa física: null.' },
+      },
+      required: ['tipo_pessoa', 'nome', 'cpf', 'cnpj'],
+    },
+  },
+};
+
+async function executeRegisterCustomerDataTool(rawArguments, clienteId) {
+  let args;
+  try {
+    args = JSON.parse(rawArguments || '{}');
+  } catch (_) {
+    return { erro: 'argumentos inválidos' };
+  }
+
+  if (args?.tipo_pessoa === 'PF') {
+    const nome = String(args.nome || '').trim();
+    if (nome.length < 3) {
+      return { erro: 'nome completo não informado' };
+    }
+    if (!documento.isCpfValido(args.cpf)) {
+      return { erro: 'CPF inválido, peça para o cliente conferir o número' };
+    }
+    const dados = { tipo_pessoa: 'PF', nome, cpf: documento.formatarCpf(args.cpf) };
+    cartService.definirDadosCliente(clienteId, dados);
+    return { registrado: true, ...dados };
+  }
+
+  if (args?.tipo_pessoa === 'PJ') {
+    if (!documento.isCnpjValido(args.cnpj)) {
+      return { erro: 'CNPJ inválido, peça para o cliente conferir o número' };
+    }
+
+    // Consulta indisponível (null) não bloqueia o pedido: segue só com o CNPJ.
+    const consulta = await cnpjService.consultarCnpj(args.cnpj);
+    if (consulta && !consulta.encontrado) {
+      return { erro: 'CNPJ não encontrado na Receita, peça para o cliente conferir o número' };
+    }
+
+    const dados = {
+      tipo_pessoa: 'PJ',
+      cnpj: documento.formatarCnpj(args.cnpj),
+      razao_social: consulta?.razao_social || null,
+      nome_fantasia: consulta?.nome_fantasia || null,
+    };
+    cartService.definirDadosCliente(clienteId, dados);
+    return { registrado: true, ...dados };
+  }
+
+  return { erro: 'tipo_pessoa deve ser PF ou PJ' };
+}
 
 function executeAddCartItemTool(rawArguments, clienteId) {
   let args;
@@ -116,13 +186,18 @@ function executeAddCartItemTool(rawArguments, clienteId) {
   return { itens, valor_total_geral: cartService.calcularTotal(itens) };
 }
 
-function executeViewCartTool(clienteId) {
+async function executeViewCartTool({ cliente, clienteId, messageId }) {
   const itens = cartService.getItens(clienteId);
-  return { itens, valor_total_geral: cartService.calcularTotal(itens) };
+  const dadosCadastroPendentes = await orcamentoService.precisaDadosCadastro({
+    cliente,
+    dadosCliente: cartService.getDadosCliente(clienteId),
+    messageId,
+  });
+  return { itens, valor_total_geral: cartService.calcularTotal(itens), dados_cadastro_pendentes: dadosCadastroPendentes };
 }
 
 function executeClearCartTool(clienteId) {
-  cartService.limpar(clienteId);
+  cartService.limparItens(clienteId);
   return { itens: [], valor_total_geral: 0 };
 }
 
@@ -308,7 +383,7 @@ function getCurrentWeekday() {
   }).format(new Date());
 }
 
-async function generateReply({ history = [], userText = '', messageId = null, clienteId = null }) {
+async function generateReply({ history = [], userText = '', messageId = null, clienteId = null, cliente = null }) {
   const { client, model, provider } = getAiClientAndModel();
   const startedAt = Date.now();
   const prefix = flowPrefix(messageId);
@@ -349,7 +424,7 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
     else request.reasoning_effort = 'low';
 
     if (provider === 'openai') request.response_format = projeto.jsonSchema;
-    if (allowTools) request.tools = [PRODUCT_SEARCH_TOOL, ADD_CART_ITEM_TOOL, VIEW_CART_TOOL, CLEAR_CART_TOOL];
+    if (allowTools) request.tools = [PRODUCT_SEARCH_TOOL, ADD_CART_ITEM_TOOL, VIEW_CART_TOOL, CLEAR_CART_TOOL, REGISTER_CUSTOMER_DATA_TOOL];
 
     const response = await client.chat.completions.create(request);
     const choiceMessage = response.choices?.[0]?.message;
@@ -367,9 +442,11 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
         } else if (toolName === 'adicionar_item_carrinho') {
           result = executeAddCartItemTool(toolCall.function?.arguments, clienteId);
         } else if (toolName === 'consultar_carrinho') {
-          result = executeViewCartTool(clienteId);
+          result = await executeViewCartTool({ cliente, clienteId, messageId });
         } else if (toolName === 'limpar_carrinho') {
           result = executeClearCartTool(clienteId);
+        } else if (toolName === 'registrar_dados_cliente') {
+          result = await executeRegisterCustomerDataTool(toolCall.function?.arguments, clienteId);
         } else {
           result = { erro: 'ferramenta desconhecida' };
         }

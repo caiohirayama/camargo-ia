@@ -25,6 +25,7 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
     instanceName,
     messageId,
     clienteId: cliente?.id,
+    cliente,
   });
 
   let reply = aiResult?.replyText?.trim() || 'Só um momento, já te retorno com uma resposta certinha.';
@@ -45,12 +46,14 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
   let pedidoRegistrado = null;
   let orcamentoConfirmado = null;
   let falhaAoRegistrarPedido = false;
+  let dadosCadastroPendentes = false;
 
   if (aiResult?.confirmarPedido) {
     const itensCarrinho = cartService.getItens(cliente?.id);
     if (itensCarrinho.length > 0) {
       const orcamentoPendente = {
         nome_cliente: cartService.getNomeCliente(cliente?.id),
+        dados_cliente: cartService.getDadosCliente(cliente?.id),
         itens: itensCarrinho,
         valor_total_geral: cartService.calcularTotal(itensCarrinho),
       };
@@ -63,15 +66,27 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
         orcamentoConfirmado = orcamentoPendente;
         cartService.limpar(cliente?.id);
       } catch (error) {
-        falhaAoRegistrarPedido = true;
-        console.error(`${flowPrefix(messageId)} [camargo] falha ao registrar pedido confirmado no GestãoClick:`, errorSummary(error));
+        if (error instanceof orcamentoService.DadosCadastroPendentesError) {
+          // Trava do servidor: cliente novo não é cadastrado sem tipo de
+          // pessoa e documento, mesmo se a IA pular essa etapa. O carrinho
+          // fica intacto e o pedido é registrado depois que o cliente
+          // informar os dados e confirmar de novo.
+          dadosCadastroPendentes = true;
+          console.warn(`${flowPrefix(messageId)} [camargo] confirmação sem dados de cadastro de cliente novo | pedido não registrado, pedindo os dados`);
+        } else {
+          falhaAoRegistrarPedido = true;
+          console.error(`${flowPrefix(messageId)} [camargo] falha ao registrar pedido confirmado no GestãoClick:`, errorSummary(error));
+        }
       }
     } else {
       falhaAoRegistrarPedido = true;
       console.warn(`${flowPrefix(messageId)} [camargo] cliente confirmou mas o carrinho está vazio (ex: restart do processo no meio da espera)`);
     }
 
-    if (falhaAoRegistrarPedido) {
+    if (dadosCadastroPendentes) {
+      reply = 'Antes de confirmar, preciso de alguns dados para o cadastro.\n\nO pedido é para pessoa física ou jurídica?';
+      transferirHumano = false;
+    } else if (falhaAoRegistrarPedido) {
       reply = 'Só um momento, já te retorno com uma resposta certinha.';
       transferirHumano = true;
     }

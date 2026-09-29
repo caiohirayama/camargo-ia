@@ -8,7 +8,7 @@
 const carrinhos = new Map();
 
 function getEstado(clienteId) {
-  return carrinhos.get(clienteId) || { itens: [], nomeCliente: null };
+  return carrinhos.get(clienteId) || { itens: [], nomeCliente: null, dadosCliente: null };
 }
 
 function getItens(clienteId) {
@@ -35,6 +35,29 @@ function getNomeCliente(clienteId) {
   return getEstado(clienteId).nomeCliente;
 }
 
+// Dados de cadastro (tipo de pessoa + CPF/nome ou CNPJ) coletados antes de
+// cadastrar um cliente novo no GestãoClick — mesmo motivo dos itens: a IA
+// registra via tool call (`registrar_dados_cliente`) assim que o cliente
+// informa, e o cadastro lê daqui, nunca do texto da conversa.
+function definirDadosCliente(clienteId, dados) {
+  if (!clienteId || !dados) return;
+  const estado = getEstado(clienteId);
+  carrinhos.set(clienteId, { ...estado, dadosCliente: dados });
+}
+
+function getDadosCliente(clienteId) {
+  if (!clienteId) return null;
+  return getEstado(clienteId).dadosCliente;
+}
+
+// Usado quando o cliente refaz a lista (tool `limpar_carrinho`): tira só os
+// itens, sem perder nome/dados de cadastro já informados na conversa.
+function limparItens(clienteId) {
+  if (!clienteId) return;
+  const estado = getEstado(clienteId);
+  carrinhos.set(clienteId, { ...estado, itens: [] });
+}
+
 function limpar(clienteId) {
   if (!clienteId) return;
   carrinhos.delete(clienteId);
@@ -49,6 +72,9 @@ module.exports = {
   adicionarItem,
   definirNomeCliente,
   getNomeCliente,
+  definirDadosCliente,
+  getDadosCliente,
+  limparItens,
   limpar,
   calcularTotal,
 };

@@ -33,14 +33,32 @@ async function findClienteByTelefone(telefoneLocal) {
   return response.data?.data?.[0] || null;
 }
 
-// Único campo realmente obrigatório além de `nome` é `tipo_pessoa`. Contato
-// vindo do WhatsApp sempre entra como PF (a loja não pede CNPJ nesse canal).
-async function createCliente({ nome, telefoneLocal }) {
+// `cpf_cnpj` filtra de verdade (aceita com ou sem máscara), ao contrário de
+// `cpf`/`cnpj` separados, que são ignorados e devolvem a listagem inteira
+// — confirmado contra a API real.
+async function findClienteByDocumento(documento) {
+  if (!documento) return null;
+
+  const response = await axios.get(`${GESTAOCLICK_API_BASE}/clientes`, {
+    params: { cpf_cnpj: documento },
+    headers: buildHeaders(),
+    timeout: 8000,
+  });
+
+  return response.data?.data?.[0] || null;
+}
+
+// Só `tipo_pessoa` e `nome` são obrigatórios na API; CPF/CNPJ e razão
+// social vão formatados, no mesmo padrão dos cadastros já existentes.
+async function createCliente({ tipoPessoa, nome, cpf, cnpj, razaoSocial, telefoneLocal }) {
   const response = await axios.post(
     `${GESTAOCLICK_API_BASE}/clientes`,
     {
-      tipo_pessoa: 'PF',
+      tipo_pessoa: tipoPessoa === 'PJ' ? 'PJ' : 'PF',
       nome: nome || 'Cliente WhatsApp',
+      cpf: tipoPessoa === 'PJ' ? undefined : cpf || undefined,
+      cnpj: tipoPessoa === 'PJ' ? cnpj || undefined : undefined,
+      razao_social: tipoPessoa === 'PJ' ? razaoSocial || undefined : undefined,
       celular: telefoneLocal || undefined,
     },
     { headers: buildHeaders(), timeout: 8000 },
@@ -79,6 +97,7 @@ async function createOrcamento({ clienteId, itens, observacoes }) {
 module.exports = {
   isConfigured,
   findClienteByTelefone,
+  findClienteByDocumento,
   createCliente,
   createOrcamento,
 };
