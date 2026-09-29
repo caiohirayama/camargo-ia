@@ -96,7 +96,7 @@ const REGISTER_CUSTOMER_DATA_TOOL = {
   type: 'function',
   function: {
     name: 'registrar_dados_cliente',
-    description: 'Registra os dados de cadastro do cliente, informados por ele nesta conversa, necessários antes de fechar o pedido quando consultar_carrinho retorna dados_cadastro_pendentes: true. Pessoa física: nome completo e CPF. Pessoa jurídica: CNPJ. Nunca invente nem complete dados que o cliente não informou.',
+    description: 'Registra os dados de cadastro do cliente, necessários antes de fechar o pedido quando consultar_carrinho retorna dados_cadastro_pendentes: true. Só chame depois que o cliente já enviou TODOS os dados do tipo dele: pessoa física, nome completo e CPF; pessoa jurídica, CNPJ. Se ainda falta algum, não chame: peça o que falta. Nunca invente nem complete dados que o cliente não informou.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -119,13 +119,20 @@ async function executeRegisterCustomerDataTool(rawArguments, clienteId) {
     return { erro: 'argumentos inválidos' };
   }
 
+  // "Ainda não informado" e "informado errado" precisam de respostas
+  // distintas: a IA já chamou esta tool só com o nome, recebeu "CPF
+  // inválido" e disse ao cliente que o CPF estava errado antes de ele
+  // mandar qualquer número.
   if (args?.tipo_pessoa === 'PF') {
     const nome = String(args.nome || '').trim();
     if (nome.length < 3) {
-      return { erro: 'nome completo não informado' };
+      return { registrado: false, falta: 'nome', instrucao: 'Nada foi registrado. O cliente ainda não informou o nome completo: peça o nome, sem dizer que há erro.' };
+    }
+    if (!documento.onlyDigits(args.cpf)) {
+      return { registrado: false, falta: 'cpf', instrucao: 'Nada foi registrado. O cliente ainda não informou o CPF: peça o CPF, sem dizer que há erro.' };
     }
     if (!documento.isCpfValido(args.cpf)) {
-      return { erro: 'CPF inválido, peça para o cliente conferir o número' };
+      return { registrado: false, erro: 'O CPF que o cliente enviou é inválido: peça para ele conferir e enviar de novo.' };
     }
     const dados = { tipo_pessoa: 'PF', nome, cpf: documento.formatarCpf(args.cpf) };
     cartService.definirDadosCliente(clienteId, dados);
@@ -133,14 +140,17 @@ async function executeRegisterCustomerDataTool(rawArguments, clienteId) {
   }
 
   if (args?.tipo_pessoa === 'PJ') {
+    if (!documento.onlyDigits(args.cnpj)) {
+      return { registrado: false, falta: 'cnpj', instrucao: 'Nada foi registrado. O cliente ainda não informou o CNPJ: peça o CNPJ, sem dizer que há erro.' };
+    }
     if (!documento.isCnpjValido(args.cnpj)) {
-      return { erro: 'CNPJ inválido, peça para o cliente conferir o número' };
+      return { registrado: false, erro: 'O CNPJ que o cliente enviou é inválido: peça para ele conferir e enviar de novo.' };
     }
 
     // Consulta indisponível (null) não bloqueia o pedido: segue só com o CNPJ.
     const consulta = await cnpjService.consultarCnpj(args.cnpj);
     if (consulta && !consulta.encontrado) {
-      return { erro: 'CNPJ não encontrado na Receita, peça para o cliente conferir o número' };
+      return { registrado: false, erro: 'O CNPJ que o cliente enviou não existe: peça para ele conferir e enviar de novo.' };
     }
 
     const dados = {
@@ -434,7 +444,11 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
       messages.push(choiceMessage);
       for (const toolCall of toolCalls) {
         const toolName = toolCall.function?.name;
-        console.log(`${prefix} [ia] chamando ${toolName} | args=${toolCall.function?.arguments}`);
+        // CPF/CNPJ do cliente não vão por extenso para o log.
+        const logArgs = toolName === 'registrar_dados_cliente'
+          ? String(toolCall.function?.arguments || '').replace(/("(?:cpf|cnpj)"\s*:\s*")[^"]*(")/g, '$1***$2')
+          : toolCall.function?.arguments;
+        console.log(`${prefix} [ia] chamando ${toolName} | args=${logArgs}`);
 
         let result;
         if (toolName === 'consultar_produtos') {
