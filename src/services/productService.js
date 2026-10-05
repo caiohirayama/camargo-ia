@@ -51,12 +51,12 @@ function buildHeaders() {
   };
 }
 
-// O GestãoClick permite cadastrar mais de um valor de venda por produto (ex:
-// faixas "Pequena quantidade"/"Ofertas"). "Pequena quantidade" é a faixa
-// padrão sempre usada. A faixa "Ofertas" só existe de verdade quando o
-// Felipe cadastra um valor > 0 nela pra aquele produto especificamente
-// (quando não está em oferta, o valor cadastrado ali é 0.00) — por isso um
-// valor de oferta de 0 conta como "sem oferta ativa", não como preço grátis.
+// O GestãoClick permite cadastrar mais de um valor de venda por produto
+// (faixas "Pequena quantidade"/"Ofertas"). "Pequena quantidade" (valor_venda)
+// é o preço normal. A faixa "Ofertas" só vale para os produtos listados na
+// planilha de ofertas (ofertaService.js) — sozinha ela não indica promoção:
+// 179 dos 202 produtos ativos têm valor nela, e em 28 é mais caro que o
+// normal (levantamento de 2026-09-29). Valor 0.00 = sem valor cadastrado.
 function valorPorFaixa(produto, nomeFaixa) {
   const valores = Array.isArray(produto?.valores) ? produto.valores : [];
   const alvo = valores.find((item) => normalizeForCompare(item?.nome_tipo) === normalizeForCompare(nomeFaixa));
@@ -64,24 +64,14 @@ function valorPorFaixa(produto, nomeFaixa) {
   return Number.isFinite(valor) && valor > 0 ? valor : null;
 }
 
-// Retorna null quando `apenasOfertas` é pedido mas esse produto não tem
-// oferta ativa — o item some da lista de resultados em vez de aparecer com
-// preço zerado ou com o preço padrão disfarçado de oferta.
-function normalizeProduto(produto, { apenasOfertas = false } = {}) {
-  const valorOferta = valorPorFaixa(produto, 'Ofertas');
-
-  if (apenasOfertas && valorOferta === null) {
-    return null;
-  }
-
+function normalizeProduto(produto) {
   return {
     id: produto?.id,
     nome: produto?.nome,
     codigo: produto?.codigo_interno,
     ativo: produto?.ativo === '1',
     estoque: Number(produto?.estoque) || 0,
-    valor_venda: apenasOfertas ? valorOferta : (Number(produto?.valor_venda) || null),
-    em_oferta: apenasOfertas,
+    valor_venda: Number(produto?.valor_venda) || null,
     // Necessário pra fechar um orçamento no GestãoClick (POST /orcamentos
     // exige produto_id + variacao_id por item); todo produto tem ao menos
     // uma variação, mesmo sem `possui_variacao`.
@@ -89,7 +79,7 @@ function normalizeProduto(produto, { apenasOfertas = false } = {}) {
   };
 }
 
-async function searchProducts({ termo, apenasOfertas = false, messageId = null }) {
+async function searchProducts({ termo, messageId = null }) {
   const prefix = flowPrefix(messageId);
 
   if (!isProductsApiConfigured()) {
@@ -109,10 +99,9 @@ async function searchProducts({ termo, apenasOfertas = false, messageId = null }
       });
 
       const produtos = (response.data?.data || [])
-        .map((produto) => normalizeProduto(produto, { apenasOfertas }))
-        .filter(Boolean)
+        .map(normalizeProduto)
         .slice(0, MAX_RESULTADOS);
-      console.log(`${prefix} [produtos] consulta realizada | termo="${tentativa}" | apenasOfertas=${apenasOfertas} | resultados=${produtos.length}`);
+      console.log(`${prefix} [produtos] consulta realizada | termo="${tentativa}" | resultados=${produtos.length}`);
       if (produtos.length > 0) {
         return { consultaRealizada: true, produtos };
       }
@@ -125,7 +114,27 @@ async function searchProducts({ termo, apenasOfertas = false, messageId = null }
   }
 }
 
+// Catálogo ativo inteiro (~200 produtos = 3 páginas de 100, ~600 ms),
+// usado para cruzar a planilha de ofertas pelo código interno: a API não tem
+// filtro exato por código (`codigo_interno` como parâmetro é ignorado).
+async function listarCatalogoAtivo() {
+  const produtos = [];
+  for (let pagina = 1; pagina <= 20; pagina += 1) {
+    const response = await axios.get(`${GESTAOCLICK_API_BASE}/produtos`, {
+      params: { ativo: 1, limite: 100, pagina },
+      headers: buildHeaders(),
+      timeout: 8000,
+    });
+    produtos.push(...(response.data?.data || []));
+    if (!response.data?.meta?.proxima_pagina) break;
+  }
+  return produtos;
+}
+
 module.exports = {
   isProductsApiConfigured,
   searchProducts,
+  listarCatalogoAtivo,
+  normalizeProduto,
+  valorPorFaixa,
 };

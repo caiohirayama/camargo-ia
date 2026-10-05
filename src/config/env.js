@@ -55,6 +55,13 @@ const env = {
   gestaoClickAccessToken: process.env.GESTAOCLICK_ACCESS_TOKEN || null,
   gestaoClickSecretToken: process.env.GESTAOCLICK_SECRET_TOKEN || null,
   pauseExpirationHours: envNumber('PAUSE_EXPIRATION_HOURS', 12),
+  // Planilha de ofertas (Google Sheets), lida por conta de serviço. Opcional:
+  // sem essas variáveis o bot atende normalmente, só não oferece ofertas.
+  googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || null,
+  googleServiceAccountPrivateKey: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n') || null,
+  ofertasSheetId: process.env.OFERTAS_SHEET_ID || null,
+  ofertasSheetRange: process.env.OFERTAS_SHEET_RANGE || 'A:D',
+  ofertasCacheSeconds: envNumber('OFERTAS_CACHE_SECONDS', 300),
 };
 
 function validateUrl(name, value) {

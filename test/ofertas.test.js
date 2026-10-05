@@ -1,0 +1,106 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const axios = require('axios');
+const ofertaService = require('../src/services/ofertaService');
+
+const produtoHeineken = {
+  id: '75310077',
+  codigo_interno: '221',
+  nome: 'Heineken 350ml FD/12',
+  ativo: '1',
+  estoque: '519',
+  valor_venda: '55.10',
+  valores: [
+    { nome_tipo: 'Pequena quantidade', valor_venda: '55.10' },
+    { nome_tipo: 'Ofertas', valor_venda: '52.90' },
+  ],
+  variacoes: [{ variacao: { id: '999' } }],
+};
+
+test('lê a planilha pelo nome das colunas, ignorando linhas incompletas', () => {
+  const linhas = ofertaService.parsePlanilha([
+    ['DATAINICIO', 'CODIGO', 'QTDMIN', 'DATAFIM'],
+    ['29/09/2026', '221', '20', '30/09/2026'],
+    ['', '300', '5', '30/09/2026'],
+    ['1/10/2026', ' 400 ', '', '5/10/2026'],
+  ]);
+
+  assert.deepEqual(linhas, [
+    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-30' },
+    { codigo: '400', quantidadeMinima: 1, inicio: '2026-10-01', fim: '2026-10-05' },
+  ]);
+});
+
+test('só inclui oferta vigente, com produto ativo, estoque e valor na faixa Ofertas', () => {
+  const linhas = [
+    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-29' },
+    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-29' },
+    { codigo: '500', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29' },
+    { codigo: '600', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29' },
+    { codigo: '700', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29' },
+  ];
+  const produtos = [
+    produtoHeineken,
+    { ...produtoHeineken, id: '2', codigo_interno: '600', estoque: '0' },
+    { ...produtoHeineken, id: '3', codigo_interno: '700', valores: [{ nome_tipo: 'Ofertas', valor_venda: '0.00' }] },
+  ];
+
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.deepEqual(ofertaService.montarOfertas(linhas, produtos, '2026-09-29'), [{
+      id: '75310077',
+      codigo: '221',
+      nome: 'Heineken 350ml FD/12',
+      estoque: 519,
+      variacao_id: '999',
+      valor_normal: 55.1,
+      valor_oferta: 52.9,
+      quantidade_minima: 20,
+      valida_ate: '29/09/2026',
+    }]);
+    assert.deepEqual(ofertaService.montarOfertas(linhas, produtos, '2026-09-30'), []);
+    assert.deepEqual(ofertaService.montarOfertas(linhas, produtos, '2026-09-28'), []);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('troca um JWT assinado com a chave da conta de serviço por access token', async () => {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const env = require('../src/config/env');
+  Object.assign(env, {
+    googleServiceAccountEmail: 'bot@projeto.iam.gserviceaccount.com',
+    googleServiceAccountPrivateKey: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+
+  const originalPost = axios.post;
+  const originalGet = axios.get;
+  let assertion;
+  axios.post = async (url, body) => {
+    assert.equal(url, 'https://oauth2.googleapis.com/token');
+    assertion = new URLSearchParams(body).get('assertion');
+    return { data: { access_token: 'token-teste', expires_in: 3600 } };
+  };
+  axios.get = async (url, config) => {
+    assert.match(url, /\/spreadsheets\/planilha-id\/values\/A%3AD$/);
+    assert.equal(config.headers.Authorization, 'Bearer token-teste');
+    return { data: { values: [['CODIGO']] } };
+  };
+
+  try {
+    const googleSheetsService = require('../src/services/googleSheetsService');
+    assert.deepEqual(await googleSheetsService.getValues('planilha-id', 'A:D'), [['CODIGO']]);
+
+    const [header, claims, assinatura] = assertion.split('.');
+    const valida = crypto.verify('RSA-SHA256', Buffer.from(`${header}.${claims}`), publicKey, Buffer.from(assinatura, 'base64url'));
+    assert.equal(valida, true);
+    const payload = JSON.parse(Buffer.from(claims, 'base64url').toString());
+    assert.equal(payload.iss, 'bot@projeto.iam.gserviceaccount.com');
+    assert.equal(payload.scope, 'https://www.googleapis.com/auth/spreadsheets.readonly');
+  } finally {
+    axios.post = originalPost;
+    axios.get = originalGet;
+  }
+});

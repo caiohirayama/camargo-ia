@@ -5,6 +5,7 @@ const env = require('../config/env');
 const registry = require('../projects/registry');
 const productService = require('./productService');
 const cartService = require('./cartService');
+const ofertaService = require('./ofertaService');
 const orcamentoService = require('./orcamentoService');
 const cnpjService = require('./cnpjService');
 const documento = require('../utils/documento');
@@ -17,13 +18,12 @@ const PRODUCT_SEARCH_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_produtos',
-    description: 'Consulta o catálogo real da Camargo Atacarejo de Bebidas por nome/termo e retorna os produtos encontrados com preço, unidade de venda e estoque. Use sempre antes de informar preço, disponibilidade ou fechar um item de orçamento, em vez de supor pela memória.',
+    description: 'Consulta o catálogo real da Camargo Atacarejo de Bebidas por nome/termo e retorna os produtos encontrados com preço normal, unidade de venda e estoque. Produto que está em oferta hoje vem com o campo oferta (valor_oferta, quantidade_minima, valida_ate). Use sempre antes de informar preço, disponibilidade ou fechar um item de orçamento, em vez de supor pela memória.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         termo: { type: 'string', description: 'Nome ou termo de busca do produto, como o cliente descreveu (ex: "cerveja skol lata", "coca 2 litros").' },
-        apenas_ofertas: { type: 'boolean', description: 'True somente quando o cliente pediu explicitamente produtos em oferta/promoção para esse termo. Retorna só os itens que têm oferta ativa, com o preço de oferta. Falso (padrão) usa o preço normal.' },
       },
       required: ['termo'],
     },
@@ -43,8 +43,37 @@ async function executeProductSearchTool(rawArguments, messageId) {
     return { erro: 'termo de busca é obrigatório' };
   }
 
-  return productService.searchProducts({ termo, apenasOfertas: Boolean(args?.apenas_ofertas), messageId });
+  const resultado = await productService.searchProducts({ termo, messageId });
+  if (!resultado.consultaRealizada || !resultado.produtos?.length || !ofertaService.isConfigured()) {
+    return resultado;
+  }
+
+  // Marca os produtos encontrados que estão na planilha de ofertas de hoje,
+  // para a IA avisar o cliente mesmo quando ele não perguntou por oferta.
+  // Falha na planilha não derruba a consulta: segue sem a marcação.
+  const ofertas = await ofertaService.listarOfertasVigentes({ messageId });
+  const porProduto = new Map((ofertas.ofertas || []).map((oferta) => [String(oferta.id), oferta]));
+  return {
+    ...resultado,
+    produtos: resultado.produtos.map((produto) => {
+      const oferta = porProduto.get(String(produto.id));
+      return oferta
+        ? { ...produto, oferta: { valor_oferta: oferta.valor_oferta, quantidade_minima: oferta.quantidade_minima, valida_ate: oferta.valida_ate } }
+        : produto;
+    }),
+  };
 }
+
+// A planilha de ofertas define quais produtos estão em oferta e em que
+// condições; preço, estoque e ids vêm do GestãoClick (ofertaService.js).
+const OFFERS_TOOL = {
+  type: 'function',
+  function: {
+    name: 'consultar_ofertas',
+    description: 'Lista os produtos em oferta hoje, com preço normal, preço de oferta, quantidade mínima para pagar o preço de oferta, validade, estoque e os ids para o carrinho. Use quando o cliente perguntar por ofertas, promoções ou descontos, com ou sem citar um produto.',
+    parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+  },
+};
 
 // O carrinho é a fonte real dos itens do pedido — nunca a memória da
 // conversa. Adicionar um item aqui, no momento exato em que o cliente
@@ -54,7 +83,7 @@ const ADD_CART_ITEM_TOOL = {
   type: 'function',
   function: {
     name: 'adicionar_item_carrinho',
-    description: 'Adiciona ao carrinho um item que o cliente acabou de confirmar (produto exato e quantidade), usando os dados que consultar_produtos retornou nesta mesma conversa. Chame isso sempre que o cliente confirmar um item, imediatamente — nunca espere até o fim da lista.',
+    description: 'Adiciona ao carrinho um item que o cliente acabou de confirmar (produto exato e quantidade), usando os dados que consultar_produtos ou consultar_ofertas retornou nesta mesma conversa. O retorno traz o preço realmente aplicado (em_oferta indica se foi o de oferta). Chame isso sempre que o cliente confirmar um item, imediatamente — nunca espere até o fim da lista.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -64,7 +93,7 @@ const ADD_CART_ITEM_TOOL = {
         variacao_id: { type: 'string', description: 'Campo variacao_id retornado por consultar_produtos para este item. Nunca invente.' },
         quantidade: { type: 'number', description: 'Quantidade confirmada pelo cliente.' },
         unidade: { type: 'string', description: 'Unidade de venda (ex: caixa, fardo, unidade), conforme o catálogo.' },
-        valor_unitario: { type: 'number', description: 'Preço unitário retornado por consultar_produtos nesta conversa (preço normal ou de oferta, conforme o que foi consultado).' },
+        valor_unitario: { type: 'number', description: 'Preço unitário normal retornado por consultar_produtos ou consultar_ofertas nesta conversa. Se o produto estiver em oferta e a quantidade atingir o mínimo, o sistema aplica o preço de oferta sozinho.' },
       },
       required: ['produto', 'produto_id', 'variacao_id', 'quantidade', 'unidade', 'valor_unitario'],
     },
@@ -166,7 +195,7 @@ async function executeRegisterCustomerDataTool(rawArguments, clienteId) {
   return { erro: 'tipo_pessoa deve ser PF ou PJ' };
 }
 
-function executeAddCartItemTool(rawArguments, clienteId) {
+async function executeAddCartItemTool(rawArguments, clienteId, messageId) {
   let args;
   try {
     args = JSON.parse(rawArguments || '{}');
@@ -182,18 +211,50 @@ function executeAddCartItemTool(rawArguments, clienteId) {
     return { erro: 'dados incompletos para adicionar ao carrinho' };
   }
 
+  // O preço de oferta é decidido aqui, não pela IA: vale só para produto
+  // da planilha vigente e com quantidade >= QTDMIN. Abaixo do mínimo, volta
+  // ao preço normal mesmo que a IA tenha mandado o de oferta.
+  let valorAplicado = valorUnitarioNum;
+  let emOferta = false;
+  let observacao = null;
+  const oferta = ofertaService.isConfigured()
+    ? await ofertaService.buscarOfertaVigente(produto_id, { messageId })
+    : null;
+  if (oferta) {
+    if (quantidadeNum >= oferta.quantidade_minima) {
+      valorAplicado = oferta.valor_oferta;
+      emOferta = true;
+    } else {
+      valorAplicado = oferta.valor_normal ?? valorUnitarioNum;
+      observacao = `Preço de oferta só a partir de ${oferta.quantidade_minima}; com essa quantidade vale o preço normal.`;
+    }
+  }
+
   const item = {
     produto,
     produto_id: String(produto_id),
     variacao_id: String(variacao_id),
     quantidade: quantidadeNum,
     unidade,
-    valor_unitario: valorUnitarioNum,
-    valor_total: quantidadeNum * valorUnitarioNum,
+    valor_unitario: valorAplicado,
+    valor_total: quantidadeNum * valorAplicado,
+    em_oferta: emOferta,
   };
 
   const itens = cartService.adicionarItem(clienteId, item);
-  return { itens, valor_total_geral: cartService.calcularTotal(itens) };
+  return {
+    item_adicionado: { ...item, ...(observacao ? { observacao } : {}) },
+    itens,
+    valor_total_geral: cartService.calcularTotal(itens),
+  };
+}
+
+async function executeOffersTool(messageId) {
+  const resultado = await ofertaService.listarOfertasVigentes({ messageId });
+  if (resultado.consultaRealizada && resultado.ofertas.length === 0) {
+    return { ...resultado, mensagem: 'nenhuma oferta vigente hoje' };
+  }
+  return resultado;
 }
 
 async function executeViewCartTool({ cliente, clienteId, messageId }) {
@@ -434,7 +495,7 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
     else request.reasoning_effort = 'low';
 
     if (provider === 'openai') request.response_format = projeto.jsonSchema;
-    if (allowTools) request.tools = [PRODUCT_SEARCH_TOOL, ADD_CART_ITEM_TOOL, VIEW_CART_TOOL, CLEAR_CART_TOOL, REGISTER_CUSTOMER_DATA_TOOL];
+    if (allowTools) request.tools = [PRODUCT_SEARCH_TOOL, ADD_CART_ITEM_TOOL, VIEW_CART_TOOL, CLEAR_CART_TOOL, REGISTER_CUSTOMER_DATA_TOOL, OFFERS_TOOL];
 
     const response = await client.chat.completions.create(request);
     const choiceMessage = response.choices?.[0]?.message;
@@ -454,7 +515,9 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
         if (toolName === 'consultar_produtos') {
           result = await executeProductSearchTool(toolCall.function?.arguments, messageId);
         } else if (toolName === 'adicionar_item_carrinho') {
-          result = executeAddCartItemTool(toolCall.function?.arguments, clienteId);
+          result = await executeAddCartItemTool(toolCall.function?.arguments, clienteId, messageId);
+        } else if (toolName === 'consultar_ofertas') {
+          result = await executeOffersTool(messageId);
         } else if (toolName === 'consultar_carrinho') {
           result = await executeViewCartTool({ cliente, clienteId, messageId });
         } else if (toolName === 'limpar_carrinho') {
