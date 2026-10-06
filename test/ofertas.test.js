@@ -18,18 +18,37 @@ const produtoHeineken = {
   variacoes: [{ variacao: { id: '999' } }],
 };
 
-test('lê a planilha pelo nome das colunas, ignorando linhas incompletas', () => {
-  const linhas = ofertaService.parsePlanilha([
-    ['DATAINICIO', 'CODIGO', 'QTDMIN', 'DATAFIM', 'VALOR'],
-    ['29/09/2026', '221', '20', '30/09/2026', 'R$ 53,00'],
-    ['', '300', '5', '30/09/2026', 'R$ 10,00'],
-    ['1/10/2026', ' 400 ', '', '5/10/2026'],
-  ]);
+test('lê a planilha pelo nome das colunas; data vazia vale como sem limite, data ilegível descarta a linha', () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  let linhas;
+  try {
+    linhas = ofertaService.parsePlanilha([
+      ['DATAINICIO', 'CODIGO', 'QTDMIN', 'DATAFIM', 'VALOR'],
+      ['29/09/2026', '221', '20', '30/09/2026', 'R$ 53,00'],
+      ['', '300', '5', '30/09/2026', 'R$ 10,00'],
+      ['1/10/2026', ' 400 ', '', '5/10/2026'],
+      ['', '500', '6', '', 'R$ 15,90'],
+      ['31-12-2026', '600', '1', '', 'R$ 1,00'],
+      ['', '', '1', '', 'R$ 1,00'],
+    ]);
+  } finally {
+    console.warn = originalWarn;
+  }
 
   assert.deepEqual(linhas, [
     { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-30', valor: 53 },
+    { codigo: '300', quantidadeMinima: 5, inicio: null, fim: '2026-09-30', valor: 10 },
     { codigo: '400', quantidadeMinima: 1, inicio: '2026-10-01', fim: '2026-10-05', valor: null },
+    { codigo: '500', quantidadeMinima: 6, inicio: null, fim: null, valor: 15.9 },
   ]);
+});
+
+test('calcula unidades por embalagem pelo nome do produto', () => {
+  assert.equal(ofertaService.unidadesPorEmbalagem('Baly Tradicional 2L FD/06'), 6);
+  assert.equal(ofertaService.unidadesPorEmbalagem('Heineken 600ml CX/24'), 24);
+  assert.equal(ofertaService.unidadesPorEmbalagem('Heineken Zero Long 330ml  FD/24'), 24);
+  assert.equal(ofertaService.unidadesPorEmbalagem('1985 Licor'), null);
 });
 
 test('converte o VALOR da planilha no formato brasileiro', () => {
@@ -67,11 +86,20 @@ test('só inclui oferta vigente, com produto ativo, estoque e VALOR na planilha;
       variacao_id: '999',
       valor_normal: 55.1,
       valor_oferta: 52.9,
+      unidades_por_embalagem: 12,
+      valor_oferta_unidade: 4.41,
       quantidade_minima: 20,
       valida_ate: '29/09/2026',
+      bloco_mensagem: 'Heineken 350ml FD/12\nR$ 4,41 a unidade\nR$ 52,90 o fardo com 12\nA partir de 20 fardos\nVálido até 29/09/2026',
     }]);
     assert.deepEqual(ofertaService.montarOfertas(linhas, produtos, '2026-09-30'), []);
     assert.deepEqual(ofertaService.montarOfertas(linhas, produtos, '2026-09-28'), []);
+
+    // Sem datas: vale todo dia e sai sem validade.
+    const semData = ofertaService.montarOfertas([{ codigo: '221', quantidadeMinima: 1, inicio: null, fim: null, valor: 41.35 }], produtos, '2030-01-01');
+    assert.equal(semData.length, 1);
+    assert.equal(semData[0].valida_ate, null);
+    assert.equal(semData[0].valor_oferta_unidade, 3.45);
   } finally {
     console.warn = originalWarn;
   }

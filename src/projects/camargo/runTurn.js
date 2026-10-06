@@ -106,7 +106,11 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
     });
   }
 
-  const chunks = splitReplyIntoChunks(reply);
+  // Lista de ofertas e resumo do pedido vão inteiros numa mensagem só
+  // (pedido da loja), mesmo com linhas em branco separando os produtos.
+  const chunks = aiResult?.mensagemUnica && !falhaAoRegistrarPedido && !dadosCadastroPendentes
+    ? [reply.trim()].filter(Boolean)
+    : splitReplyIntoChunks(reply);
   for (const chunk of chunks) {
     // Se transferirHumano é true, a pausa acima foi causada por este próprio turno
     // (handoff intencional) — não é o atendente assumindo no meio do envio, então

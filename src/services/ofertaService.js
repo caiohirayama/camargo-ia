@@ -6,7 +6,7 @@ const { flowPrefix, errorSummary } = require('../utils/logContext');
 // A planilha de ofertas (Google Sheets) é a fonte de QUAIS produtos estão em
 // oferta e em que condições: CODIGO (código interno no GestãoClick), QTDMIN
 // (quantidade mínima para pagar o preço de oferta), DATAINICIO/DATAFIM
-// (dd/mm/aaaa, inclusivas) e VALOR (preço de oferta, ex: "R$ 53,00"). O preço
+// (dd/mm/aaaa, inclusivas; vazias = sem limite daquele lado) e VALOR (preço de oferta, ex: "R$ 53,00"). O preço
 // de oferta vem SEMPRE da planilha: a faixa "Ofertas" do GestãoClick é
 // inconsistente (em vários produtos é mais cara que o preço normal). Nome,
 // estoque, preço normal e ids vêm do GestãoClick.
@@ -55,9 +55,56 @@ function hojeEmSaoPaulo() {
   }).format(new Date());
 }
 
+// Data vazia = sem limite naquele lado (sem DATAINICIO: já vale; sem
+// DATAFIM: vale até a linha ser apagada). Data preenchida mas ilegível
+// descarta a linha: um erro de digitação não pode virar oferta sem prazo.
+function parseDataOpcional(value) {
+  if (!String(value || '').trim()) return { ok: true, data: null };
+  const data = parseData(value);
+  return { ok: Boolean(data), data };
+}
+
+// "Baly Tradicional 2L FD/06" -> 6, "Heineken 600ml CX/24" -> 24; null quando
+// o nome não traz a embalagem (produto vendido por unidade).
+function unidadesPorEmbalagem(nome) {
+  const match = String(nome || '').match(/\b(?:FD|CX|PCT|PC|EMB|ENG)\s*\/?\s*(\d+)\b/i);
+  const unidades = match ? Number(match[1]) : null;
+  return unidades && unidades > 1 ? unidades : null;
+}
+
+function formatarReais(valor) {
+  return `R$ ${Number(valor).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
+}
+
+// FD = fardo, CX = caixa (como a loja chama a embalagem no WhatsApp).
+function nomeEmbalagem(nome) {
+  if (/\bFD\s*\/?\s*\d+/i.test(nome)) return { singular: 'fardo', plural: 'fardos', artigo: 'o' };
+  if (/\bCX\s*\/?\s*\d+/i.test(nome)) return { singular: 'caixa', plural: 'caixas', artigo: 'a' };
+  return null;
+}
+
+// Bloco pronto de cada oferta para a mensagem "OFERTAS BOMBÁSTICAS": montado
+// aqui e copiado pela IA, porque numa lista longa o modelo pulava linhas
+// (ex: a quantidade mínima). Linhas opcionais só aparecem quando há dado.
+function montarBlocoOferta({ nome, valorOferta, unidades, valorUnidade, quantidadeMinima, validaAte }) {
+  const embalagem = nomeEmbalagem(nome);
+  const linhas = [String(nome).replace(/\s+/g, ' ').trim()];
+  if (valorUnidade) linhas.push(`${formatarReais(valorUnidade)} a unidade`);
+  if (embalagem && unidades) {
+    linhas.push(`${formatarReais(valorOferta)} ${embalagem.artigo} ${embalagem.singular} com ${unidades}`);
+  } else {
+    linhas.push(formatarReais(valorOferta));
+  }
+  if (quantidadeMinima > 1) {
+    linhas.push(`A partir de ${quantidadeMinima} ${embalagem ? embalagem.plural : 'unidades'}`);
+  }
+  if (validaAte) linhas.push(`Válido até ${validaAte}`);
+  return linhas.join('\n');
+}
+
 // Localiza as colunas pelo nome do cabeçalho (não pela posição), para a
 // planilha continuar funcionando se alguém inserir uma coluna no meio.
-// Linhas incompletas ou com data inválida são ignoradas.
+// Linhas sem código ou com data ilegível são ignoradas.
 function parsePlanilha(values) {
   const linhas = Array.isArray(values) ? values : [];
   const indiceCabecalho = linhas.findIndex((linha) => (linha || []).some((celula) => normalizarCabecalho(celula) === 'CODIGO'));
@@ -69,17 +116,21 @@ function parsePlanilha(values) {
 
   return linhas.slice(indiceCabecalho + 1).flatMap((linha) => {
     const codigo = String(linha?.[cCodigo] || '').trim();
-    const inicio = parseData(linha?.[cInicio]);
-    const fim = parseData(linha?.[cFim]);
+    const inicio = parseDataOpcional(cInicio >= 0 ? linha?.[cInicio] : '');
+    const fim = parseDataOpcional(cFim >= 0 ? linha?.[cFim] : '');
     const quantidadeMinima = Number(String(linha?.[cQtdMin] || '').replace(',', '.')) || 1;
     const valor = cValor >= 0 ? parseValor(linha?.[cValor]) : null;
-    if (!codigo || !inicio || !fim) return [];
-    return [{ codigo, quantidadeMinima, inicio, fim, valor }];
+    if (!codigo) return [];
+    if (!inicio.ok || !fim.ok) {
+      console.warn(`[ofertas] código ${codigo} ignorado: data inválida na planilha (use dd/mm/aaaa)`);
+      return [];
+    }
+    return [{ codigo, quantidadeMinima, inicio: inicio.data, fim: fim.data, valor }];
   });
 }
 
 function isVigente(linha, hoje) {
-  return linha.inicio <= hoje && hoje <= linha.fim;
+  return (!linha.inicio || linha.inicio <= hoje) && (!linha.fim || hoje <= linha.fim);
 }
 
 async function getLinhasPlanilha() {
@@ -124,6 +175,12 @@ function montarOfertas(linhas, produtos, hoje, prefix = '') {
       console.warn(`${prefix} [ofertas] código ${linha.codigo} (${base.nome}) com valor de oferta ${valorOferta} maior ou igual ao normal ${base.valor_venda}`);
     }
 
+    // Preço por unidade calculado aqui, não pela IA (conta de divisão em
+    // texto livre é onde o modelo erra). Arredondado como no material da
+    // loja: 41,35 / 6 = 6,89.
+    const unidades = unidadesPorEmbalagem(base.nome);
+    const valorUnidade = unidades ? Math.round((valorOferta / unidades) * 100) / 100 : null;
+    const validaAte = linha.fim ? formatarData(linha.fim) : null;
     return [{
       id: base.id,
       codigo: base.codigo,
@@ -132,8 +189,18 @@ function montarOfertas(linhas, produtos, hoje, prefix = '') {
       variacao_id: base.variacao_id,
       valor_normal: base.valor_venda,
       valor_oferta: valorOferta,
+      unidades_por_embalagem: unidades,
+      valor_oferta_unidade: valorUnidade,
       quantidade_minima: linha.quantidadeMinima,
-      valida_ate: formatarData(linha.fim),
+      valida_ate: validaAte,
+      bloco_mensagem: montarBlocoOferta({
+        nome: base.nome,
+        valorOferta,
+        unidades,
+        valorUnidade,
+        quantidadeMinima: linha.quantidadeMinima,
+        validaAte,
+      }),
     }];
   });
 }
@@ -171,5 +238,6 @@ module.exports = {
   // Exportados para teste.
   parsePlanilha,
   parseValor,
+  unidadesPorEmbalagem,
   montarOfertas,
 };

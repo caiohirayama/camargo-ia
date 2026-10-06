@@ -15,6 +15,10 @@ const JSON_SCHEMA = {
           type: 'string',
           description: 'Mensagem que será enviada ao cliente no WhatsApp. Separe partes que devem virar mensagens distintas com uma linha em branco (\\n\\n); cada uma vira uma bolha própria enviada com simulação de digitação. Use quebra de linha simples (\\n) para organizar frases dentro da mesma bolha.',
         },
+        mensagem_unica: {
+          type: 'boolean',
+          description: 'True quando resposta_cliente deve ser enviada inteira numa única mensagem do WhatsApp, mesmo com linhas em branco: obrigatório na lista de ofertas e no resumo final do pedido. False em todas as outras respostas (as linhas em branco viram mensagens separadas).',
+        },
         transferir_humano: {
           type: 'boolean',
           description: 'True somente quando um atendente humano precisa assumir a conversa (situações de transferência descritas no prompt). Pausa a IA para esse cliente.',
@@ -36,7 +40,7 @@ const JSON_SCHEMA = {
           required: ['nome_cliente'],
         },
       },
-      required: ['resposta_cliente', 'transferir_humano', 'confirmar_pedido', 'orcamento'],
+      required: ['resposta_cliente', 'mensagem_unica', 'transferir_humano', 'confirmar_pedido', 'orcamento'],
     },
   },
 };

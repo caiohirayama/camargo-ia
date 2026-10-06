@@ -58,7 +58,7 @@ async function executeProductSearchTool(rawArguments, messageId) {
     produtos: resultado.produtos.map((produto) => {
       const oferta = porProduto.get(String(produto.id));
       return oferta
-        ? { ...produto, oferta: { valor_oferta: oferta.valor_oferta, quantidade_minima: oferta.quantidade_minima, valida_ate: oferta.valida_ate } }
+        ? { ...produto, oferta: { valor_oferta: oferta.valor_oferta, valor_oferta_unidade: oferta.valor_oferta_unidade, unidades_por_embalagem: oferta.unidades_por_embalagem, quantidade_minima: oferta.quantidade_minima, valida_ate: oferta.valida_ate } }
         : produto;
     }),
   };
@@ -70,7 +70,7 @@ const OFFERS_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_ofertas',
-    description: 'Lista os produtos em oferta hoje, com preço normal, preço de oferta, quantidade mínima para pagar o preço de oferta, validade, estoque e os ids para o carrinho. Use quando o cliente perguntar por ofertas, promoções ou descontos, com ou sem citar um produto.',
+    description: 'Lista os produtos em oferta hoje, com preço normal, preço de oferta da embalagem (valor_oferta), preço de oferta por unidade (valor_oferta_unidade, já calculado), unidades por embalagem, quantidade mínima para pagar o preço de oferta, validade (valida_ate, null quando não tem), estoque e os ids para o carrinho. Use quando o cliente perguntar por ofertas, promoções ou descontos, com ou sem citar um produto.',
     parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
   },
 };
@@ -419,6 +419,7 @@ function parseStructuredReply(raw, projeto) {
     return {
       replyText: replyText || projeto.buildSafeFallbackReply(),
       transferToHuman: Boolean(parsed?.transferir_humano),
+      mensagemUnica: Boolean(parsed?.mensagem_unica),
       confirmarPedido: Boolean(parsed?.confirmar_pedido),
       orcamento: parsed?.orcamento && typeof parsed.orcamento === 'object' ? parsed.orcamento : null,
       rawContent: normalizedRaw,
