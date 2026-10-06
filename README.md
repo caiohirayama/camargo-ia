@@ -59,11 +59,11 @@ Gere os dois em **Configurações > Integração via API** no GestãoClick. O Se
 
 Sem as duas variáveis configuradas, a ferramenta fica indisponível e a IA trata toda pergunta de preço/produto como "catálogo indisponível", encaminhando para um atendente (`transferir_humano: true`) em vez de inventar valores.
 
-Cada produto pode ter mais de um valor de venda cadastrado no GestãoClick (faixas "Pequena quantidade"/"Ofertas"). "Pequena quantidade" é sempre o preço normal. A faixa "Ofertas" só é usada para os produtos da planilha de ofertas (abaixo) — sozinha ela não indica promoção.
+Cada produto pode ter mais de um valor de venda cadastrado no GestãoClick (faixas "Pequena quantidade"/"Ofertas"). "Pequena quantidade" é sempre o preço normal. A faixa "Ofertas" não é usada (é inconsistente, em vários produtos mais cara que o normal): o preço de oferta vem da coluna `VALOR` da planilha de ofertas (abaixo).
 
 ### Ofertas (Google Sheets)
 
-Quais produtos estão em oferta, e em que condições, vem de uma planilha no Google Sheets com as colunas `CODIGO` (código interno do produto no GestãoClick), `QTDMIN` (quantidade mínima para pagar o preço de oferta), `DATAINICIO` e `DATAFIM` (`dd/mm/aaaa`, inclusivas). As colunas são localizadas pelo nome do cabeçalho. `src/services/ofertaService.js` cruza as linhas vigentes hoje com o catálogo ativo: nome, estoque e preço de oferta (faixa "Ofertas") vêm do GestãoClick; produto inexistente, sem estoque ou sem valor na faixa "Ofertas" fica de fora (com aviso no log). A IA lista as ofertas pela tool `consultar_ofertas`, e `adicionar_item_carrinho` aplica o preço de oferta no servidor só quando a quantidade atinge o `QTDMIN`.
+Quais produtos estão em oferta, e em que condições, vem de uma planilha no Google Sheets com as colunas `CODIGO` (código interno do produto no GestãoClick), `QTDMIN` (quantidade mínima para pagar o preço de oferta), `DATAINICIO` e `DATAFIM` (`dd/mm/aaaa`, inclusivas) e `VALOR` (preço de oferta, ex: `R$ 53,00`). As colunas são localizadas pelo nome do cabeçalho. `src/services/ofertaService.js` cruza as linhas vigentes hoje com o catálogo ativo: nome, estoque e preço normal vêm do GestãoClick e o preço de oferta vem da coluna `VALOR`; produto inexistente, sem estoque ou sem `VALOR` válido fica de fora (com aviso no log). A IA lista as ofertas pela tool `consultar_ofertas`, e `adicionar_item_carrinho` aplica o preço de oferta no servidor só quando a quantidade atinge o `QTDMIN`.
 
 A leitura usa uma conta de serviço do Google (Google Cloud > IAM > Contas de serviço, com a **Google Sheets API** ativada no projeto). Compartilhe a planilha como leitor com o e-mail da conta e configure:
 
@@ -71,7 +71,7 @@ A leitura usa uma conta de serviço do Google (Google Cloud > IAM > Contas de se
 - `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` — `private_key` do JSON, numa linha só entre aspas, com `
 ` no lugar das quebras;
 - `OFERTAS_SHEET_ID` — o trecho entre `/d/` e `/edit` no link da planilha;
-- `OFERTAS_SHEET_RANGE` (opcional, padrão `A:D` da primeira aba; ex: `OFERTAS!A:D`);
+- `OFERTAS_SHEET_RANGE` (opcional, padrão `A:Z` da primeira aba; ex: `OFERTAS!A:Z`);
 - `OFERTAS_CACHE_SECONDS` (opcional, padrão 300) — por quanto tempo uma leitura da planilha é reaproveitada.
 
 Sem essas variáveis o bot funciona normalmente e só responde que não há ofertas.

@@ -5,9 +5,11 @@ const { flowPrefix, errorSummary } = require('../utils/logContext');
 
 // A planilha de ofertas (Google Sheets) é a fonte de QUAIS produtos estão em
 // oferta e em que condições: CODIGO (código interno no GestãoClick), QTDMIN
-// (quantidade mínima para pagar o preço de oferta) e DATAINICIO/DATAFIM
-// (dd/mm/aaaa, inclusivas). Preço, nome, estoque e ids vêm sempre do
-// GestãoClick — o preço de oferta é a faixa "Ofertas" do produto.
+// (quantidade mínima para pagar o preço de oferta), DATAINICIO/DATAFIM
+// (dd/mm/aaaa, inclusivas) e VALOR (preço de oferta, ex: "R$ 53,00"). O preço
+// de oferta vem SEMPRE da planilha: a faixa "Ofertas" do GestãoClick é
+// inconsistente (em vários produtos é mais cara que o preço normal). Nome,
+// estoque, preço normal e ids vêm do GestãoClick.
 const CATALOGO_CACHE_MS = 60 * 1000;
 
 let planilhaCache = { linhas: null, expiresAt: 0 };
@@ -19,6 +21,16 @@ function isConfigured() {
 
 function normalizarCabecalho(value) {
   return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z]/gi, '').toUpperCase();
+}
+
+// "R$ 1.234,56" / "53,00" / "53.5" -> número; null se vazio ou inválido.
+function parseValor(value) {
+  let texto = String(value || '').replace(/[^\d.,]/g, '');
+  if (!texto) return null;
+  // Vírgula presente = formato brasileiro: ponto é separador de milhar.
+  if (texto.includes(',')) texto = texto.replace(/\./g, '').replace(',', '.');
+  const valor = Number(texto);
+  return Number.isFinite(valor) && valor > 0 ? valor : null;
 }
 
 // "29/09/2026" -> "2026-09-29" (comparável como texto); null se inválida.
@@ -53,15 +65,16 @@ function parsePlanilha(values) {
 
   const cabecalho = linhas[indiceCabecalho].map(normalizarCabecalho);
   const col = (nome) => cabecalho.indexOf(nome);
-  const [cCodigo, cQtdMin, cInicio, cFim] = [col('CODIGO'), col('QTDMIN'), col('DATAINICIO'), col('DATAFIM')];
+  const [cCodigo, cQtdMin, cInicio, cFim, cValor] = [col('CODIGO'), col('QTDMIN'), col('DATAINICIO'), col('DATAFIM'), col('VALOR')];
 
   return linhas.slice(indiceCabecalho + 1).flatMap((linha) => {
     const codigo = String(linha?.[cCodigo] || '').trim();
     const inicio = parseData(linha?.[cInicio]);
     const fim = parseData(linha?.[cFim]);
     const quantidadeMinima = Number(String(linha?.[cQtdMin] || '').replace(',', '.')) || 1;
+    const valor = cValor >= 0 ? parseValor(linha?.[cValor]) : null;
     if (!codigo || !inicio || !fim) return [];
-    return [{ codigo, quantidadeMinima, inicio, fim }];
+    return [{ codigo, quantidadeMinima, inicio, fim, valor }];
   });
 }
 
@@ -86,7 +99,7 @@ async function getCatalogo() {
 
 // Cruza as linhas vigentes da planilha com o catálogo. Fica de fora (com log
 // para quem mantém a planilha) o código que não existe/está inativo no
-// sistema, que está sem estoque ou sem valor na faixa "Ofertas".
+// sistema, que está sem estoque ou sem VALOR preenchido na planilha.
 function montarOfertas(linhas, produtos, hoje, prefix = '') {
   const porCodigo = new Map(produtos.map((produto) => [String(produto?.codigo_interno || '').trim(), produto]));
   const vistas = new Set();
@@ -101,9 +114,9 @@ function montarOfertas(linhas, produtos, hoje, prefix = '') {
     vistas.add(produto.id);
 
     const base = productService.normalizeProduto(produto);
-    const valorOferta = productService.valorPorFaixa(produto, 'Ofertas');
-    if (valorOferta === null) {
-      console.warn(`${prefix} [ofertas] código ${linha.codigo} (${base.nome}) sem valor na faixa "Ofertas" do GestãoClick`);
+    const valorOferta = linha.valor;
+    if (valorOferta === null || valorOferta === undefined) {
+      console.warn(`${prefix} [ofertas] código ${linha.codigo} (${base.nome}) sem VALOR válido na planilha de ofertas`);
       return [];
     }
     if (base.estoque <= 0) return [];
@@ -157,5 +170,6 @@ module.exports = {
   buscarOfertaVigente,
   // Exportados para teste.
   parsePlanilha,
+  parseValor,
   montarOfertas,
 };

@@ -20,30 +20,40 @@ const produtoHeineken = {
 
 test('lê a planilha pelo nome das colunas, ignorando linhas incompletas', () => {
   const linhas = ofertaService.parsePlanilha([
-    ['DATAINICIO', 'CODIGO', 'QTDMIN', 'DATAFIM'],
-    ['29/09/2026', '221', '20', '30/09/2026'],
-    ['', '300', '5', '30/09/2026'],
+    ['DATAINICIO', 'CODIGO', 'QTDMIN', 'DATAFIM', 'VALOR'],
+    ['29/09/2026', '221', '20', '30/09/2026', 'R$ 53,00'],
+    ['', '300', '5', '30/09/2026', 'R$ 10,00'],
     ['1/10/2026', ' 400 ', '', '5/10/2026'],
   ]);
 
   assert.deepEqual(linhas, [
-    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-30' },
-    { codigo: '400', quantidadeMinima: 1, inicio: '2026-10-01', fim: '2026-10-05' },
+    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-30', valor: 53 },
+    { codigo: '400', quantidadeMinima: 1, inicio: '2026-10-01', fim: '2026-10-05', valor: null },
   ]);
 });
 
-test('só inclui oferta vigente, com produto ativo, estoque e valor na faixa Ofertas', () => {
+test('converte o VALOR da planilha no formato brasileiro', () => {
+  assert.equal(ofertaService.parseValor('R$ 195,00'), 195);
+  assert.equal(ofertaService.parseValor('R$ 1.234,56'), 1234.56);
+  assert.equal(ofertaService.parseValor('39,55'), 39.55);
+  assert.equal(ofertaService.parseValor('53.5'), 53.5);
+  assert.equal(ofertaService.parseValor(''), null);
+  assert.equal(ofertaService.parseValor('R$ 0,00'), null);
+});
+
+test('só inclui oferta vigente, com produto ativo, estoque e VALOR na planilha; ignora a faixa Ofertas do sistema', () => {
   const linhas = [
-    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-29' },
-    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-29' },
-    { codigo: '500', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29' },
-    { codigo: '600', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29' },
-    { codigo: '700', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29' },
+    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-29', valor: 52.9 },
+    { codigo: '221', quantidadeMinima: 20, inicio: '2026-09-29', fim: '2026-09-29', valor: 52.9 },
+    { codigo: '500', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29', valor: 10 },
+    { codigo: '600', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29', valor: 10 },
+    { codigo: '700', quantidadeMinima: 1, inicio: '2026-09-29', fim: '2026-09-29', valor: null },
   ];
   const produtos = [
-    produtoHeineken,
+    // Faixa "Ofertas" do sistema mais cara que o normal: tem de ser ignorada.
+    { ...produtoHeineken, valores: [{ nome_tipo: 'Ofertas', valor_venda: '55.31' }] },
     { ...produtoHeineken, id: '2', codigo_interno: '600', estoque: '0' },
-    { ...produtoHeineken, id: '3', codigo_interno: '700', valores: [{ nome_tipo: 'Ofertas', valor_venda: '0.00' }] },
+    { ...produtoHeineken, id: '3', codigo_interno: '700' },
   ];
 
   const originalWarn = console.warn;

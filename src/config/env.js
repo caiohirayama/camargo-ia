@@ -60,7 +60,7 @@ const env = {
   googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || null,
   googleServiceAccountPrivateKey: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n') || null,
   ofertasSheetId: process.env.OFERTAS_SHEET_ID || null,
-  ofertasSheetRange: process.env.OFERTAS_SHEET_RANGE || 'A:D',
+  ofertasSheetRange: process.env.OFERTAS_SHEET_RANGE || 'A:Z',
   ofertasCacheSeconds: envNumber('OFERTAS_CACHE_SECONDS', 300),
 };
 

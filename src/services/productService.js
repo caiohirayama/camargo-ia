@@ -53,8 +53,8 @@ function buildHeaders() {
 
 // O GestãoClick permite cadastrar mais de um valor de venda por produto
 // (faixas "Pequena quantidade"/"Ofertas"). "Pequena quantidade" (valor_venda)
-// é o preço normal. A faixa "Ofertas" só vale para os produtos listados na
-// planilha de ofertas (ofertaService.js) — sozinha ela não indica promoção:
+// é o preço normal. A faixa "Ofertas" NÃO é usada: o preço de oferta vem da
+// coluna VALOR da planilha de ofertas (ofertaService.js). Ela é inconsistente:
 // 179 dos 202 produtos ativos têm valor nela, e em 28 é mais caro que o
 // normal (levantamento de 2026-09-29). Valor 0.00 = sem valor cadastrado.
 function valorPorFaixa(produto, nomeFaixa) {
