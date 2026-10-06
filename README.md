@@ -76,6 +76,10 @@ A leitura usa uma conta de serviço do Google (Google Cloud > IAM > Contas de se
 
 Sem essas variáveis o bot funciona normalmente e só responde que não há ofertas.
 
+### Avisos para a equipe
+
+Quando a IA transfere um cliente para atendimento pessoal ou um pedido é confirmado, `src/services/notificationService.js` avisa a equipe no grupo de WhatsApp configurado em `WHATSAPP_NOTIFICATION_GROUP_JID` (JID terminado em `@g.us`; o número da instância precisa participar do grupo). O aviso sai pela mesma instância da Evolution, sem simular digitação e sem gravar em `Bot.Mensagens`; o webhook ignora eventos de grupo, então ele não pausa a IA. Sem a variável, os avisos vão para o Telegram (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`). Alerta de queda da conexão do WhatsApp continua sempre no Telegram, porque com o WhatsApp fora o aviso não chegaria.
+
 ### Orçamento no GestãoClick
 
 Depois que o cliente confirma explicitamente o resumo do pedido no WhatsApp (ver `camargo_agent_prompt.md`, seção "Confirmação do pedido"), `src/services/orcamentoService.js` registra o pedido de verdade no GestãoClick, usando as mesmas credenciais `GESTAOCLICK_ACCESS_TOKEN`/`GESTAOCLICK_SECRET_TOKEN`:

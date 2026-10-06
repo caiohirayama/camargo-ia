@@ -167,8 +167,26 @@ async function setWebhook(instanceName) {
   });
 }
 
+// Aviso interno (ex: grupo da equipe): sem simular digitação e sem gravar em
+// Bot.Mensagens — não é conversa com cliente. O webhook já ignora qualquer
+// evento de grupo, então este envio também não é tomado como atendente
+// assumindo a conversa.
+async function sendNotificationText({ remoteJid, text }) {
+  const number = jidToNumber(remoteJid);
+  if (!number || !text) return null;
+  const configuredInstance = getInstanceName();
+  const response = await buildClient().post(`/message/sendText/${encodeURIComponent(configuredInstance)}`, {
+    number,
+    text,
+    delay: 0,
+    linkPreview: false,
+  });
+  return response?.data?.key?.id || null;
+}
+
 module.exports = {
   sendText,
+  sendNotificationText,
   setWebhook,
   downloadMedia,
   wasSentByAi,

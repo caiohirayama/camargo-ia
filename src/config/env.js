@@ -42,6 +42,9 @@ const env = {
   messageDebounceMs: Number(process.env.MESSAGE_DEBOUNCE_MS) || 25000,
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   telegramChatId: process.env.TELEGRAM_CHAT_ID,
+  // Grupo de WhatsApp (JID terminado em @g.us) que recebe os avisos para a
+  // equipe. Vazio = avisos vão para o Telegram.
+  whatsappNotificationGroupJid: process.env.WHATSAPP_NOTIFICATION_GROUP_JID || null,
   r2AccountId: process.env.R2_ACCOUNT_ID,
   r2AccessKeyId: process.env.R2_ACCESS_KEY_ID,
   r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY,

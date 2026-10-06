@@ -1,6 +1,6 @@
 const customerService = require('../../services/customerService');
 const evolutionService = require('../../services/evolutionService');
-const telegramService = require('../../services/telegramService');
+const notificationService = require('../../services/notificationService');
 const orcamentoService = require('../../services/orcamentoService');
 const cartService = require('../../services/cartService');
 const { flowPrefix, maskJid, errorSummary } = require('../../utils/logContext');
@@ -96,7 +96,7 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
 
   if (transferirHumano) {
     await customerService.pause(cliente?.id);
-    await telegramService.notifyAttendant({
+    await notificationService.notifyAttendant({
       sender,
       motivo: falhaAoRegistrarPedido
         ? 'Cliente confirmou o pedido, mas houve falha ao registrar no GestãoClick.'
@@ -132,7 +132,7 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
   // false): o pedido já é real no sistema, Felipe precisa saber de qualquer
   // jeito.
   if (pedidoRegistrado) {
-    await telegramService.notifyOrcamento({
+    await notificationService.notifyOrcamento({
       sender,
       orcamento: orcamentoConfirmado,
       pedidoGestaoClick: pedidoRegistrado,
