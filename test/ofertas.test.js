@@ -82,7 +82,6 @@ test('só inclui oferta vigente, com produto ativo, estoque e VALOR na planilha;
       id: '75310077',
       codigo: '221',
       nome: 'Heineken 350ml FD/12',
-      estoque: 519,
       variacao_id: '999',
       valor_normal: 55.1,
       valor_oferta: 52.9,
@@ -90,7 +89,7 @@ test('só inclui oferta vigente, com produto ativo, estoque e VALOR na planilha;
       valor_oferta_unidade: 4.41,
       quantidade_minima: 20,
       valida_ate: '29/09/2026',
-      bloco_mensagem: 'Heineken 350ml FD/12\nR$ 4,41 a unidade\nR$ 52,90 o fardo com 12\nA partir de 20 fardos\nVálido até 29/09/2026',
+      bloco_mensagem: '🔥 Heineken 350ml FD/12\n🏷️ R$ 4,41 a unidade\n💰 R$ 52,90 o fardo com 12\n📦 A partir de 20 fardos\n⏰ Válido até 29/09/2026',
     }]);
     assert.deepEqual(ofertaService.montarOfertas(linhas, produtos, '2026-09-30'), []);
     assert.deepEqual(ofertaService.montarOfertas(linhas, produtos, '2026-09-28'), []);

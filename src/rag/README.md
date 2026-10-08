@@ -7,6 +7,7 @@ Os arquivos em `knowledge/` guardam fatos e políticas da Camargo Atacarejo de B
 - `src/prompts/camargo_agent_prompt.md`: identidade, estilo, fluxo, segurança e formato de saída.
 - `knowledge/company.md`: empresa, contato, endereço e retirada.
 - `knowledge/hours.md`: horário de atendimento.
+- `knowledge/payment.md`: formas de pagamento na loja (dinheiro, Pix, cartão com taxa de 3%) e Pix CNPJ para separação de pedido.
 - `knowledge/commercial-policies.md`: preço/estoque, orçamento, fora do escopo e reclamações.
 
 Preço, disponibilidade e unidade de venda de produtos **não** ficam no RAG — vêm sempre da consulta em tempo real ao catálogo (`consultar_produtos`, ver `src/services/productService.js`).

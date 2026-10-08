@@ -134,7 +134,7 @@ Os endpoints `/test/set-webhook` e `/test/send-test` usam automaticamente `CAMAR
 
 ### Pausa da IA e expiração automática
 
-Quando um atendente manda mensagem manualmente pelo número conectado, o cliente manda uma mensagem interativa (botão/lista) ou a IA marca `transferir_humano: true`, a IA para de responder aquele cliente (`Bot.Cliente.iaPausada = true`). Essa pausa não é permanente: se ninguém — nem cliente, nem atendente — mandar mensagem por `PAUSE_EXPIRATION_HOURS` (padrão 12h), a próxima mensagem do cliente já reativa a IA sozinha, sem precisar de intervenção manual. Isso existe porque a compra é recorrente: um cliente não pode voltar dias depois e continuar sem resposta só porque ficou pausado uma vez por qualquer motivo pontual.
+Quando um atendente manda mensagem manualmente pelo número conectado, o cliente manda uma mensagem interativa (botão/lista) ou a IA marca `transferir_humano: true`, a IA para de responder aquele cliente (`Bot.Cliente.iaPausada = true`). Essa pausa não é permanente: se ninguém — nem cliente, nem atendente — mandar mensagem por `PAUSE_EXPIRATION_HOURS` (padrão 4h), a próxima mensagem do cliente já reativa a IA sozinha, sem precisar de intervenção manual. Isso existe porque a compra é recorrente: um cliente não pode voltar dias depois e continuar sem resposta só porque ficou pausado uma vez por qualquer motivo pontual.
 
 ### Modo de teste (restringir IA a números específicos)
 

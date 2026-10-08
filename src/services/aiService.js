@@ -18,7 +18,7 @@ const PRODUCT_SEARCH_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_produtos',
-    description: 'Consulta o catálogo real da Camargo Atacarejo de Bebidas por nome/termo e retorna os produtos encontrados com preço normal, unidade de venda e estoque. Produto que está em oferta hoje vem com o campo oferta (valor_oferta, quantidade_minima, valida_ate). Use sempre antes de informar preço, disponibilidade ou fechar um item de orçamento, em vez de supor pela memória.',
+    description: 'Consulta o catálogo real da Camargo Atacarejo de Bebidas por nome/termo e retorna os produtos encontrados com preço normal, unidade de venda e em_estoque (se tem ou não no momento, sem a quantidade). Produto que está em oferta hoje vem com o campo oferta (valor_oferta, quantidade_minima, valida_ate). Use sempre antes de informar preço, disponibilidade ou fechar um item de orçamento, em vez de supor pela memória.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -65,12 +65,12 @@ async function executeProductSearchTool(rawArguments, messageId) {
 }
 
 // A planilha de ofertas define quais produtos estão em oferta e em que
-// condições; preço, estoque e ids vêm do GestãoClick (ofertaService.js).
+// condições; preço e ids vêm do GestãoClick (ofertaService.js).
 const OFFERS_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_ofertas',
-    description: 'Lista os produtos em oferta hoje, com preço normal, preço de oferta da embalagem (valor_oferta), preço de oferta por unidade (valor_oferta_unidade, já calculado), unidades por embalagem, quantidade mínima para pagar o preço de oferta, validade (valida_ate, null quando não tem), estoque e os ids para o carrinho. Use quando o cliente perguntar por ofertas, promoções ou descontos, com ou sem citar um produto.',
+    description: 'Lista os produtos em oferta hoje, com preço normal, preço de oferta da embalagem (valor_oferta), preço de oferta por unidade (valor_oferta_unidade, já calculado), unidades por embalagem, quantidade mínima para pagar o preço de oferta, validade (valida_ate, null quando não tem) e os ids para o carrinho. Use quando o cliente perguntar por ofertas, promoções ou descontos, com ou sem citar um produto.',
     parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
   },
 };

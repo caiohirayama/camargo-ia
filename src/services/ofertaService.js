@@ -88,17 +88,17 @@ function nomeEmbalagem(nome) {
 // (ex: a quantidade mínima). Linhas opcionais só aparecem quando há dado.
 function montarBlocoOferta({ nome, valorOferta, unidades, valorUnidade, quantidadeMinima, validaAte }) {
   const embalagem = nomeEmbalagem(nome);
-  const linhas = [String(nome).replace(/\s+/g, ' ').trim()];
-  if (valorUnidade) linhas.push(`${formatarReais(valorUnidade)} a unidade`);
+  const linhas = [`🔥 ${String(nome).replace(/\s+/g, ' ').trim()}`];
+  if (valorUnidade) linhas.push(`🏷️ ${formatarReais(valorUnidade)} a unidade`);
   if (embalagem && unidades) {
-    linhas.push(`${formatarReais(valorOferta)} ${embalagem.artigo} ${embalagem.singular} com ${unidades}`);
+    linhas.push(`💰 ${formatarReais(valorOferta)} ${embalagem.artigo} ${embalagem.singular} com ${unidades}`);
   } else {
-    linhas.push(formatarReais(valorOferta));
+    linhas.push(`💰 ${formatarReais(valorOferta)}`);
   }
   if (quantidadeMinima > 1) {
-    linhas.push(`A partir de ${quantidadeMinima} ${embalagem ? embalagem.plural : 'unidades'}`);
+    linhas.push(`📦 A partir de ${quantidadeMinima} ${embalagem ? embalagem.plural : 'unidades'}`);
   }
-  if (validaAte) linhas.push(`Válido até ${validaAte}`);
+  if (validaAte) linhas.push(`⏰ Válido até ${validaAte}`);
   return linhas.join('\n');
 }
 
@@ -170,7 +170,7 @@ function montarOfertas(linhas, produtos, hoje, prefix = '') {
       console.warn(`${prefix} [ofertas] código ${linha.codigo} (${base.nome}) sem VALOR válido na planilha de ofertas`);
       return [];
     }
-    if (base.estoque <= 0) return [];
+    if ((Number(produto?.estoque) || 0) <= 0) return [];
     if (base.valor_venda !== null && valorOferta >= base.valor_venda) {
       console.warn(`${prefix} [ofertas] código ${linha.codigo} (${base.nome}) com valor de oferta ${valorOferta} maior ou igual ao normal ${base.valor_venda}`);
     }
@@ -185,7 +185,6 @@ function montarOfertas(linhas, produtos, hoje, prefix = '') {
       id: base.id,
       codigo: base.codigo,
       nome: base.nome,
-      estoque: base.estoque,
       variacao_id: base.variacao_id,
       valor_normal: base.valor_venda,
       valor_oferta: valorOferta,

@@ -5,6 +5,9 @@ const orcamentoService = require('../../services/orcamentoService');
 const cartService = require('../../services/cartService');
 const { flowPrefix, maskJid, errorSummary } = require('../../utils/logContext');
 
+// Última linha da saudação de abertura do prompt (camargo_agent_prompt.md).
+const FIM_DA_SAUDACAO = 'Pode mandar sua lista por aqui!';
+
 // A IA separa partes que devem virar bolhas distintas no WhatsApp com uma
 // linha em branco. Cada parte é enviada em uma chamada própria, o que já
 // aciona a simulação de digitação (presença "composing" + delay) por bolha.
@@ -106,9 +109,12 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
     });
   }
 
-  // Lista de ofertas e resumo do pedido vão inteiros numa mensagem só
-  // (pedido da loja), mesmo com linhas em branco separando os produtos.
-  const chunks = aiResult?.mensagemUnica && !falhaAoRegistrarPedido && !dadosCadastroPendentes
+  // Saudação, lista de ofertas e resumo do pedido vão inteiros numa mensagem
+  // só (pedido da loja), mesmo com linhas em branco separando os blocos. A
+  // saudação completa é reconhecida aqui também, caso a IA não marque
+  // mensagem_unica.
+  const mensagemUnica = aiResult?.mensagemUnica || reply.includes(FIM_DA_SAUDACAO);
+  const chunks = mensagemUnica && !falhaAoRegistrarPedido && !dadosCadastroPendentes
     ? [reply.trim()].filter(Boolean)
     : splitReplyIntoChunks(reply);
   for (const chunk of chunks) {
