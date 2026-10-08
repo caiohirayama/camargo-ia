@@ -18,7 +18,7 @@ const PRODUCT_SEARCH_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_produtos',
-    description: 'Consulta o catálogo real da Camargo Atacarejo de Bebidas por nome/termo e retorna os produtos encontrados com preço normal, unidade de venda e em_estoque (se tem ou não no momento, sem a quantidade). Produto que está em oferta hoje vem com o campo oferta (valor_oferta, quantidade_minima, valida_ate). Use sempre antes de informar preço, disponibilidade ou fechar um item de orçamento, em vez de supor pela memória.',
+    description: 'Consulta o catálogo real da Camargo Atacarejo de Bebidas por nome/termo e retorna os produtos encontrados com preço normal, unidade de venda e em_estoque (se tem ou não no momento, sem a quantidade). Com correspondencia_exata false, não achou o nome pedido e os produtos são os mais parecidos do catálogo. Produto que está em oferta hoje vem com o campo oferta (valor_oferta, quantidade_minima, valida_ate). Use sempre antes de informar preço, disponibilidade ou fechar um item de orçamento, em vez de supor pela memória.',
     parameters: {
       type: 'object',
       additionalProperties: false,

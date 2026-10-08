@@ -57,11 +57,11 @@ function palavrasParaBusca(termo) {
   return [...new Set(palavras)].sort((a, b) => b.length - a.length).slice(0, MAX_BUSCAS_POR_PALAVRA);
 }
 
-// Produto bate com o termo se contém todas as palavras dele, ignorando
-// acento, caixa e apóstrofo.
-function nomeContemTermo(nome, termo) {
+// Quantas palavras do termo o nome contém, ignorando acento, caixa e
+// apóstrofo. Produto bate com o termo quando contém todas.
+function palavrasEmComum(nome, termo) {
   const nomeComparavel = semApostrofo(nome);
-  return semApostrofo(termo).split(/\s+/).filter(Boolean).every((palavra) => nomeComparavel.includes(palavra));
+  return semApostrofo(termo).split(/\s+/).filter(Boolean).filter((palavra) => nomeComparavel.includes(palavra)).length;
 }
 
 function isProductsApiConfigured() {
@@ -138,9 +138,13 @@ async function searchProducts({ termo, messageId = null }) {
 
     // Reserva para grafia diferente do cadastro (apóstrofo): busca por uma
     // palavra do termo e filtra aqui pelo termo inteiro.
+    const totalPalavras = semApostrofo(termoLimpo).split(/\s+/).filter(Boolean).length;
+    const candidatos = new Map();
     for (const palavra of palavrasParaBusca(termoLimpo)) {
-      const produtos = (await buscarPorNome(palavra, 100))
-        .filter((produto) => nomeContemTermo(produto?.nome, termoLimpo))
+      const encontrados = await buscarPorNome(palavra, 100);
+      encontrados.forEach((produto) => candidatos.set(produto.id, produto));
+      const produtos = encontrados
+        .filter((produto) => palavrasEmComum(produto?.nome, termoLimpo) === totalPalavras)
         .map(normalizeProduto)
         .slice(0, MAX_RESULTADOS);
       console.log(`${prefix} [produtos] consulta por palavra | termo="${termoLimpo}" | palavra="${palavra}" | resultados=${produtos.length}`);
@@ -149,7 +153,18 @@ async function searchProducts({ termo, messageId = null }) {
       }
     }
 
-    return { consultaRealizada: true, produtos: [] };
+    // Nome diferente do cadastro (ex: "maçã verde" para "Jack Daniel's
+    // Apple 1L"): devolve os produtos que mais se parecem com o termo, para a
+    // IA oferecer as opções em vez de transferir para um atendente.
+    const pontuados = [...candidatos.values()].map((produto) => ({ produto, pontos: palavrasEmComum(produto?.nome, termoLimpo) }));
+    const melhor = Math.max(0, ...pontuados.map((item) => item.pontos));
+    const parecidos = melhor > 0
+      ? pontuados.filter((item) => item.pontos === melhor).map((item) => normalizeProduto(item.produto)).slice(0, MAX_RESULTADOS)
+      : [];
+    console.log(`${prefix} [produtos] produtos parecidos | termo="${termoLimpo}" | resultados=${parecidos.length}`);
+    return parecidos.length > 0
+      ? { consultaRealizada: true, correspondencia_exata: false, produtos: parecidos }
+      : { consultaRealizada: true, produtos: [] };
   } catch (error) {
     console.error(`${prefix} [produtos] falha ao consultar API de produtos:`, errorSummary(error));
     return { consultaRealizada: false, motivo: 'falha ao consultar o catálogo' };
