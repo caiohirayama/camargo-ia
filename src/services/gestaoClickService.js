@@ -67,6 +67,31 @@ async function createCliente({ tipoPessoa, nome, cpf, cnpj, razaoSocial, telefon
   return response.data?.data;
 }
 
+async function getCliente(id) {
+  const response = await axios.get(`${GESTAOCLICK_API_BASE}/clientes/${id}`, {
+    headers: buildHeaders(),
+    timeout: 8000,
+  });
+  return response.data?.data || null;
+}
+
+// Campos que só a API preenche: não voltam no PUT.
+const CAMPOS_SOMENTE_LEITURA = ['id', 'nome_vendedor', 'cadastrado_em', 'modificado_em'];
+
+// Manda o cadastro inteiro (como veio do GET) com as alterações por cima,
+// em vez de só os campos alterados: assim nada se perde, mesmo que o PUT da
+// API substitua o cadastro em vez de mesclar.
+async function updateCliente(atual, alteracoes) {
+  const corpo = { ...atual, ...alteracoes };
+  CAMPOS_SOMENTE_LEITURA.forEach((campo) => delete corpo[campo]);
+
+  const response = await axios.put(`${GESTAOCLICK_API_BASE}/clientes/${atual.id}`, corpo, {
+    headers: buildHeaders(),
+    timeout: 8000,
+  });
+  return response.data?.data;
+}
+
 // vendedor_id fica de fora de propósito: a API já preenche com o dono do
 // token quando omitido. Canal de venda não tem endpoint de listagem, então
 // fica no padrão ("Presencial"). valor_venda de cada item precisa ser
@@ -98,6 +123,8 @@ module.exports = {
   isConfigured,
   findClienteByTelefone,
   findClienteByDocumento,
+  getCliente,
   createCliente,
+  updateCliente,
   createOrcamento,
 };

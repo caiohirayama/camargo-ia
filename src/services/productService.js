@@ -105,6 +105,18 @@ function normalizeProduto(produto) {
   };
 }
 
+// Produto sem estoque não vai para a IA: listar o que acabou só polui a
+// mensagem. Quando tudo o que bateu com o termo está zerado, a consulta avisa
+// com `sem_estoque: true` (sem a lista), para a IA dizer que acabou em vez de
+// tratar como produto que a loja não vende.
+function comEstoqueSemLimite(produtos) {
+  return produtos.map(normalizeProduto).filter((produto) => produto.em_estoque);
+}
+
+function comEstoque(produtos) {
+  return comEstoqueSemLimite(produtos).slice(0, MAX_RESULTADOS);
+}
+
 async function searchProducts({ termo, messageId = null }) {
   const prefix = flowPrefix(messageId);
 
@@ -127,12 +139,13 @@ async function searchProducts({ termo, messageId = null }) {
 
   try {
     for (const tentativa of tentativas) {
-      const produtos = (await buscarPorNome(tentativa))
-        .map(normalizeProduto)
-        .slice(0, MAX_RESULTADOS);
-      console.log(`${prefix} [produtos] consulta realizada | termo="${tentativa}" | resultados=${produtos.length}`);
-      if (produtos.length > 0) {
-        return { consultaRealizada: true, produtos };
+      const encontrados = await buscarPorNome(tentativa);
+      const produtos = comEstoque(encontrados);
+      console.log(`${prefix} [produtos] consulta realizada | termo="${tentativa}" | resultados=${encontrados.length} | com_estoque=${produtos.length}`);
+      if (encontrados.length > 0) {
+        return produtos.length > 0
+          ? { consultaRealizada: true, produtos }
+          : { consultaRealizada: true, produtos: [], sem_estoque: true };
       }
     }
 
@@ -143,23 +156,25 @@ async function searchProducts({ termo, messageId = null }) {
     for (const palavra of palavrasParaBusca(termoLimpo)) {
       const encontrados = await buscarPorNome(palavra, 100);
       encontrados.forEach((produto) => candidatos.set(produto.id, produto));
-      const produtos = encontrados
-        .filter((produto) => palavrasEmComum(produto?.nome, termoLimpo) === totalPalavras)
-        .map(normalizeProduto)
-        .slice(0, MAX_RESULTADOS);
-      console.log(`${prefix} [produtos] consulta por palavra | termo="${termoLimpo}" | palavra="${palavra}" | resultados=${produtos.length}`);
-      if (produtos.length > 0) {
-        return { consultaRealizada: true, produtos };
+      const correspondentes = encontrados.filter((produto) => palavrasEmComum(produto?.nome, termoLimpo) === totalPalavras);
+      const produtos = comEstoque(correspondentes);
+      console.log(`${prefix} [produtos] consulta por palavra | termo="${termoLimpo}" | palavra="${palavra}" | resultados=${correspondentes.length} | com_estoque=${produtos.length}`);
+      if (correspondentes.length > 0) {
+        return produtos.length > 0
+          ? { consultaRealizada: true, produtos }
+          : { consultaRealizada: true, produtos: [], sem_estoque: true };
       }
     }
 
     // Nome diferente do cadastro (ex: "maçã verde" para "Jack Daniel's
-    // Apple 1L"): devolve os produtos que mais se parecem com o termo, para a
-    // IA oferecer as opções em vez de transferir para um atendente.
-    const pontuados = [...candidatos.values()].map((produto) => ({ produto, pontos: palavrasEmComum(produto?.nome, termoLimpo) }));
+    // Apple 1L"): devolve os produtos com estoque que mais se parecem com o
+    // termo, para a IA oferecer as opções em vez de transferir para um
+    // atendente.
+    const pontuados = comEstoqueSemLimite([...candidatos.values()])
+      .map((produto) => ({ produto, pontos: palavrasEmComum(produto.nome, termoLimpo) }));
     const melhor = Math.max(0, ...pontuados.map((item) => item.pontos));
     const parecidos = melhor > 0
-      ? pontuados.filter((item) => item.pontos === melhor).map((item) => normalizeProduto(item.produto)).slice(0, MAX_RESULTADOS)
+      ? pontuados.filter((item) => item.pontos === melhor).map((item) => item.produto).slice(0, MAX_RESULTADOS)
       : [];
     console.log(`${prefix} [produtos] produtos parecidos | termo="${termoLimpo}" | resultados=${parecidos.length}`);
     return parecidos.length > 0

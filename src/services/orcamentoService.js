@@ -4,10 +4,66 @@ const { flowPrefix, errorSummary } = require('../utils/logContext');
 
 // Bot.Cliente.telefone vem com DDI (jidToPhone em customerService.js), mas o
 // GestãoClick guarda celular sem DDI e só casa busca por telefone nesse
-// formato (ver gestaoClickService.findClienteByTelefone).
-function toLocalPhone(telefoneComDdi) {
-  const digits = String(telefoneComDdi || '').replace(/\D/g, '');
-  return digits.startsWith('55') ? digits.slice(2) : digits;
+// formato (ver gestaoClickService.findClienteByTelefone). Contato que chega
+// só como @lid tem em `telefone` o identificador do WhatsApp, não o número:
+// ele não vira telefone (null), senão o GestãoClick descarta e o cliente
+// fica cadastrado sem telefone.
+function toLocalPhone(telefone) {
+  const digits = String(telefone || '').replace(/\D/g, '');
+  const local = /^55\d{10,11}$/.test(digits) ? digits.slice(2) : digits;
+  return /^[1-9]{2}9?\d{8}$/.test(local) ? local : null;
+}
+
+// Telefone do contato no WhatsApp ou, se ele chegou só como @lid, o que o
+// cliente informou no cadastro.
+function telefoneDoCliente(cliente, dadosCliente) {
+  return toLocalPhone(cliente?.telefone) || toLocalPhone(dadosCliente?.telefone);
+}
+
+function somenteDigitos(valor) {
+  return String(valor || '').replace(/\D/g, '');
+}
+
+// "19991957082" -> "(19)99195-7082", mesmo formato dos cadastros da loja.
+function formatarTelefone(local) {
+  const match = String(local).match(/^(\d{2})(\d{4,5})(\d{4})$/);
+  return match ? `(${match[1]})${match[2]}-${match[3]}` : local;
+}
+
+// Cliente que já existe no GestãoClick é completado com o que faltar no
+// cadastro (telefone, CPF/CNPJ, nome), sem sobrescrever o que a loja já
+// preencheu. Falha aqui não impede o pedido: só fica no log.
+async function completarCadastroExistente({ gestaoClickClienteId, cliente, dadosCliente, messageId }) {
+  const prefix = flowPrefix(messageId);
+  try {
+    const atual = await gestaoClickService.getCliente(gestaoClickClienteId);
+    if (!atual) return;
+
+    const alteracoes = {};
+    const telefone = telefoneDoCliente(cliente, dadosCliente);
+    const telefonesCadastrados = [somenteDigitos(atual.celular), somenteDigitos(atual.telefone)];
+    if (telefone && !telefonesCadastrados.includes(telefone)) {
+      if (!atual.celular) alteracoes.celular = formatarTelefone(telefone);
+      else if (!atual.telefone) alteracoes.telefone = formatarTelefone(telefone);
+    }
+
+    if (dadosCliente?.tipo_pessoa && dadosCliente.tipo_pessoa === atual.tipo_pessoa) {
+      if (dadosCliente.tipo_pessoa === 'PF') {
+        if (!atual.cpf && dadosCliente.cpf) alteracoes.cpf = dadosCliente.cpf;
+        if ((!atual.nome || atual.nome === 'Cliente WhatsApp') && dadosCliente.nome) alteracoes.nome = dadosCliente.nome;
+      } else {
+        if (!atual.cnpj && dadosCliente.cnpj) alteracoes.cnpj = dadosCliente.cnpj;
+        if (!atual.razao_social && dadosCliente.razao_social) alteracoes.razao_social = dadosCliente.razao_social;
+      }
+    }
+
+    const campos = Object.keys(alteracoes);
+    if (!campos.length) return;
+    await gestaoClickService.updateCliente(atual, alteracoes);
+    console.log(`${prefix} [gestaoclick] cadastro existente atualizado | id=${gestaoClickClienteId} | campos=${campos.join(',')}`);
+  } catch (error) {
+    console.error(`${prefix} [gestaoclick] falha ao atualizar cadastro existente | id=${gestaoClickClienteId}:`, errorSummary(error));
+  }
 }
 
 // Erro esperado (não é falha de integração): o cliente ainda não existe no
@@ -31,7 +87,7 @@ async function localizarClienteExistente({ cliente, dadosCliente, messageId }) {
     return cliente.gestaoClickClienteId;
   }
 
-  const telefoneLocal = toLocalPhone(cliente?.telefone);
+  const telefoneLocal = telefoneDoCliente(cliente, dadosCliente);
   const porTelefone = await gestaoClickService.findClienteByTelefone(telefoneLocal);
   if (porTelefone?.id) {
     console.log(`${prefix} [gestaoclick] cliente já cadastrado localizado pelo telefone | id=${porTelefone.id}`);
@@ -66,18 +122,27 @@ async function precisaDadosCadastro({ cliente, dadosCliente, messageId }) {
   }
 }
 
+// Contato que chegou só como @lid e ainda não tem cadastro ligado: a IA pede
+// o telefone junto com os dados de cadastro.
+function precisaTelefone({ cliente, dadosCliente }) {
+  return !cliente?.gestaoClickClienteId && !telefoneDoCliente(cliente, dadosCliente);
+}
+
 async function ensureGestaoClickCliente({ cliente, dadosCliente, nomeOrcamento, messageId }) {
   const prefix = flowPrefix(messageId);
 
   const existenteId = await localizarClienteExistente({ cliente, dadosCliente, messageId });
-  if (existenteId) return existenteId;
+  if (existenteId) {
+    await completarCadastroExistente({ gestaoClickClienteId: existenteId, cliente, dadosCliente, messageId });
+    return existenteId;
+  }
 
   // Cliente novo nunca é cadastrado sem tipo de pessoa e documento.
   if (!dadosCliente?.tipo_pessoa) {
     throw new DadosCadastroPendentesError();
   }
 
-  const telefoneLocal = toLocalPhone(cliente?.telefone);
+  const telefoneLocal = telefoneDoCliente(cliente, dadosCliente);
   const nome = dadosCliente.tipo_pessoa === 'PJ'
     ? dadosCliente.nome_fantasia || dadosCliente.razao_social || nomeOrcamento || cliente?.nome || 'Cliente WhatsApp'
     : dadosCliente.nome;
@@ -90,7 +155,7 @@ async function ensureGestaoClickCliente({ cliente, dadosCliente, nomeOrcamento, 
     razaoSocial: dadosCliente.razao_social,
     telefoneLocal,
   });
-  console.log(`${prefix} [gestaoclick] cliente criado | id=${criado?.id} | tipo=${dadosCliente.tipo_pessoa} | nome="${nome}"`);
+  console.log(`${prefix} [gestaoclick] cliente criado | id=${criado?.id} | tipo=${dadosCliente.tipo_pessoa} | nome="${nome}" | telefone=${telefoneLocal ? 'sim' : 'não'}`);
   await customerService.setGestaoClickClienteId(cliente?.id, criado?.id);
   return criado?.id;
 }
@@ -127,5 +192,7 @@ async function registrarPedidoConfirmado({ cliente, orcamento, messageId }) {
 module.exports = {
   registrarPedidoConfirmado,
   precisaDadosCadastro,
+  precisaTelefone,
+  toLocalPhone,
   DadosCadastroPendentesError,
 };

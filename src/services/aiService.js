@@ -18,7 +18,7 @@ const PRODUCT_SEARCH_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_produtos',
-    description: 'Consulta o catálogo real da Camargo Atacarejo de Bebidas por nome/termo e retorna os produtos encontrados com preço normal, unidade de venda e em_estoque (se tem ou não no momento, sem a quantidade). Com correspondencia_exata false, não achou o nome pedido e os produtos são os mais parecidos do catálogo. Produto que está em oferta hoje vem com o campo oferta (valor_oferta, quantidade_minima, valida_ate). Use sempre antes de informar preço, disponibilidade ou fechar um item de orçamento, em vez de supor pela memória.',
+    description: 'Consulta o catálogo real da Camargo Atacarejo de Bebidas por nome/termo e retorna só os produtos com estoque, com preço normal e unidade de venda. Com sem_estoque true, o produto existe no catálogo mas está zerado no momento (a lista vem vazia). Com correspondencia_exata false, não achou o nome pedido e os produtos são os mais parecidos do catálogo. Produto que está em oferta hoje vem com o campo oferta (valor_oferta, quantidade_minima, valida_ate). Use sempre antes de informar preço, disponibilidade ou fechar um item de orçamento, em vez de supor pela memória.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -104,7 +104,7 @@ const VIEW_CART_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_carrinho',
-    description: 'Retorna os itens já confirmados e adicionados ao carrinho nesta conversa, com o total, e se ainda faltam os dados de cadastro do cliente (dados_cadastro_pendentes). Chame sempre antes de apresentar o resumo final do pedido ao cliente — nunca monte esse resumo de memória.',
+    description: 'Retorna os itens já confirmados e adicionados ao carrinho nesta conversa, com o total, se ainda faltam os dados de cadastro do cliente (dados_cadastro_pendentes) e se falta o telefone dele para o cadastro (telefone_pendente). Chame sempre antes de apresentar o resumo final do pedido ao cliente — nunca monte esse resumo de memória.',
     parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
   },
 };
@@ -134,19 +134,33 @@ const REGISTER_CUSTOMER_DATA_TOOL = {
         nome: { type: ['string', 'null'], description: 'Pessoa física: nome completo informado pelo cliente. Pessoa jurídica: null.' },
         cpf: { type: ['string', 'null'], description: 'Pessoa física: CPF informado pelo cliente. Pessoa jurídica: null.' },
         cnpj: { type: ['string', 'null'], description: 'Pessoa jurídica: CNPJ informado pelo cliente. Pessoa física: null.' },
+        telefone: { type: ['string', 'null'], description: 'Telefone com DDD informado pelo cliente, só quando consultar_carrinho retornou telefone_pendente: true. Caso contrário, null.' },
       },
-      required: ['tipo_pessoa', 'nome', 'cpf', 'cnpj'],
+      required: ['tipo_pessoa', 'nome', 'cpf', 'cnpj', 'telefone'],
     },
   },
 };
 
-async function executeRegisterCustomerDataTool(rawArguments, clienteId) {
+async function executeRegisterCustomerDataTool(rawArguments, { cliente, clienteId }) {
   let args;
   try {
     args = JSON.parse(rawArguments || '{}');
   } catch (_) {
     return { erro: 'argumentos inválidos' };
   }
+
+  // Contato que chegou só como @lid: sem o telefone, o cadastro no
+  // GestãoClick ficaria sem nenhum número de contato. Conferido depois do
+  // documento, para a IA pedir os dados na ordem de sempre.
+  const telefone = orcamentoService.toLocalPhone(args?.telefone);
+  const extras = telefone ? { telefone } : {};
+  const problemaTelefone = () => {
+    if (!orcamentoService.precisaTelefone({ cliente, dadosCliente: extras })) return null;
+    if (!documento.onlyDigits(args?.telefone)) {
+      return { registrado: false, falta: 'telefone', instrucao: 'Nada foi registrado. Falta o telefone do cliente: peça o telefone com DDD, sem dizer que há erro.' };
+    }
+    return { registrado: false, erro: 'O telefone que o cliente enviou é inválido: peça para ele conferir e enviar com DDD.' };
+  };
 
   // "Ainda não informado" e "informado errado" precisam de respostas
   // distintas: a IA já chamou esta tool só com o nome, recebeu "CPF
@@ -163,7 +177,9 @@ async function executeRegisterCustomerDataTool(rawArguments, clienteId) {
     if (!documento.isCpfValido(args.cpf)) {
       return { registrado: false, erro: 'O CPF que o cliente enviou é inválido: peça para ele conferir e enviar de novo.' };
     }
-    const dados = { tipo_pessoa: 'PF', nome, cpf: documento.formatarCpf(args.cpf) };
+    const faltaTelefonePF = problemaTelefone();
+    if (faltaTelefonePF) return faltaTelefonePF;
+    const dados = { tipo_pessoa: 'PF', nome, cpf: documento.formatarCpf(args.cpf), ...extras };
     cartService.definirDadosCliente(clienteId, dados);
     return { registrado: true, ...dados };
   }
@@ -175,6 +191,8 @@ async function executeRegisterCustomerDataTool(rawArguments, clienteId) {
     if (!documento.isCnpjValido(args.cnpj)) {
       return { registrado: false, erro: 'O CNPJ que o cliente enviou é inválido: peça para ele conferir e enviar de novo.' };
     }
+    const faltaTelefonePJ = problemaTelefone();
+    if (faltaTelefonePJ) return faltaTelefonePJ;
 
     // Consulta indisponível (null) não bloqueia o pedido: segue só com o CNPJ.
     const consulta = await cnpjService.consultarCnpj(args.cnpj);
@@ -187,6 +205,7 @@ async function executeRegisterCustomerDataTool(rawArguments, clienteId) {
       cnpj: documento.formatarCnpj(args.cnpj),
       razao_social: consulta?.razao_social || null,
       nome_fantasia: consulta?.nome_fantasia || null,
+      ...extras,
     };
     cartService.definirDadosCliente(clienteId, dados);
     return { registrado: true, ...dados };
@@ -259,12 +278,14 @@ async function executeOffersTool(messageId) {
 
 async function executeViewCartTool({ cliente, clienteId, messageId }) {
   const itens = cartService.getItens(clienteId);
-  const dadosCadastroPendentes = await orcamentoService.precisaDadosCadastro({
-    cliente,
-    dadosCliente: cartService.getDadosCliente(clienteId),
-    messageId,
-  });
-  return { itens, valor_total_geral: cartService.calcularTotal(itens), dados_cadastro_pendentes: dadosCadastroPendentes };
+  const dadosCliente = cartService.getDadosCliente(clienteId);
+  const dadosCadastroPendentes = await orcamentoService.precisaDadosCadastro({ cliente, dadosCliente, messageId });
+  return {
+    itens,
+    valor_total_geral: cartService.calcularTotal(itens),
+    dados_cadastro_pendentes: dadosCadastroPendentes,
+    telefone_pendente: orcamentoService.precisaTelefone({ cliente, dadosCliente }),
+  };
 }
 
 function executeClearCartTool(clienteId) {
@@ -506,9 +527,9 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
       messages.push(choiceMessage);
       for (const toolCall of toolCalls) {
         const toolName = toolCall.function?.name;
-        // CPF/CNPJ do cliente não vão por extenso para o log.
+        // CPF/CNPJ e telefone do cliente não vão por extenso para o log.
         const logArgs = toolName === 'registrar_dados_cliente'
-          ? String(toolCall.function?.arguments || '').replace(/("(?:cpf|cnpj)"\s*:\s*")[^"]*(")/g, '$1***$2')
+          ? String(toolCall.function?.arguments || '').replace(/("(?:cpf|cnpj|telefone)"\s*:\s*")[^"]*(")/g, '$1***$2')
           : toolCall.function?.arguments;
         console.log(`${prefix} [ia] chamando ${toolName} | args=${logArgs}`);
 
@@ -524,7 +545,7 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
         } else if (toolName === 'limpar_carrinho') {
           result = executeClearCartTool(clienteId);
         } else if (toolName === 'registrar_dados_cliente') {
-          result = await executeRegisterCustomerDataTool(toolCall.function?.arguments, clienteId);
+          result = await executeRegisterCustomerDataTool(toolCall.function?.arguments, { cliente, clienteId });
         } else {
           result = { erro: 'ferramenta desconhecida' };
         }

@@ -74,6 +74,7 @@ async function notifyOrcamento({ sender, orcamento, pedidoGestaoClick }) {
     pedidoGestaoClick?.codigo
       ? `Registrado no GestãoClick: orçamento nº ${pedidoGestaoClick.codigo}.`
       : 'Retirada no local; combinar pagamento e confirmar com o cliente.',
+    'Aguardando Pix: conferir o pagamento e passar para a separação. A IA pausou essa conversa.',
   ].join('\n');
 
   await enviarParaGrupo(text, 'pedido confirmado');

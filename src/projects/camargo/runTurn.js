@@ -137,7 +137,12 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
   // atendente tenha assumido a conversa no meio do envio (bolhasEnviadas
   // false): o pedido já é real no sistema, Felipe precisa saber de qualquer
   // jeito.
+  // A separação só acontece depois do Pix: a IA pausa depois de enviar a
+  // confirmação, e a equipe assume para passar a chave, conferir o
+  // comprovante e mandar separar. A pausa vem depois do envio para não cortar
+  // as bolhas da própria confirmação.
   if (pedidoRegistrado) {
+    await customerService.pause(cliente?.id);
     await notificationService.notifyOrcamento({
       sender,
       orcamento: orcamentoConfirmado,
