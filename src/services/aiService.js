@@ -24,6 +24,7 @@ const PRODUCT_SEARCH_TOOL = {
       additionalProperties: false,
       properties: {
         termo: { type: 'string', description: 'Nome ou termo de busca do produto, como o cliente descreveu (ex: "cerveja skol lata", "coca 2 litros").' },
+        categoria: { type: 'string', description: 'Categoria de bebida que o cliente pediu, quando ele disse uma (ex: "refrigerante", "energético", "cerveja", "água", "destilado", "drink pronto"). Filtra pelo grupo do produto no catálogo. Omita se o cliente não disse a categoria.' },
       },
       required: ['termo'],
     },
@@ -43,7 +44,8 @@ async function executeProductSearchTool(rawArguments, messageId) {
     return { erro: 'termo de busca é obrigatório' };
   }
 
-  const resultado = await productService.searchProducts({ termo, messageId });
+  const categoria = typeof args?.categoria === 'string' ? args.categoria : null;
+  const resultado = await productService.searchProducts({ termo, categoria, messageId });
   if (!resultado.consultaRealizada || !resultado.produtos?.length || !ofertaService.isConfigured()) {
     return resultado;
   }
@@ -70,7 +72,7 @@ const OFFERS_TOOL = {
   type: 'function',
   function: {
     name: 'consultar_ofertas',
-    description: 'Lista os produtos em oferta hoje, com preço normal, preço de oferta da embalagem (valor_oferta), preço de oferta por unidade (valor_oferta_unidade, já calculado), unidades por embalagem, quantidade mínima para pagar o preço de oferta, validade (valida_ate, null quando não tem) e os ids para o carrinho. Use quando o cliente perguntar por ofertas, promoções ou descontos, com ou sem citar um produto.',
+    description: 'Lista os produtos em oferta hoje, com preço normal, preço de oferta da embalagem (valor_oferta), preço de oferta por unidade (valor_oferta_unidade, já calculado), unidades por embalagem, quantidade mínima para pagar o preço de oferta, validade (valida_ate, null quando não tem) e os ids para o carrinho. Uma linha com vários sabores no mesmo preço vem agrupada numa oferta só, com a lista em sabores e cada produto em produtos. Use quando o cliente perguntar por ofertas, promoções ou descontos, com ou sem citar um produto.',
     parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
   },
 };
@@ -273,7 +275,8 @@ async function executeOffersTool(messageId) {
   if (resultado.consultaRealizada && resultado.ofertas.length === 0) {
     return { ...resultado, mensagem: 'nenhuma oferta vigente hoje' };
   }
-  return resultado;
+  if (!resultado.consultaRealizada) return resultado;
+  return { ...resultado, ofertas: ofertaService.agruparSabores(resultado.ofertas) };
 }
 
 async function executeViewCartTool({ cliente, clienteId, messageId }) {
@@ -476,6 +479,16 @@ function getCurrentWeekday() {
   }).format(new Date());
 }
 
+// Sábado e domingo a loja não pega pedido pelo WhatsApp: ninguém acompanha a
+// separação no fim de semana. A IA só informa preço, ofertas e horário.
+function aceitaPedidoHoje(now = new Date()) {
+  const diaSemana = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    weekday: 'short',
+  }).format(now);
+  return diaSemana !== 'Sat' && diaSemana !== 'Sun';
+}
+
 async function generateReply({ history = [], userText = '', messageId = null, clienteId = null, cliente = null }) {
   const { client, model, provider } = getAiClientAndModel();
   const startedAt = Date.now();
@@ -490,11 +503,15 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
 
   if (ragContext) console.log('[rag] contexto Camargo injetado na resposta');
 
+  const pedidosAbertos = aceitaPedidoHoje();
+  if (!pedidosAbertos) console.log(`${prefix} [ia] fim de semana | pedidos pelo WhatsApp fechados`);
+
   const messages = [
     { role: 'system', content: systemPrompt },
     {
       role: 'system',
-      content: `Data atual: ${getCurrentDate()} (${getCurrentWeekday()}), horário de Brasília. Use esta data para horário de funcionamento e validade do orçamento.`,
+      content: `Data atual: ${getCurrentDate()} (${getCurrentWeekday()}), horário de Brasília. Use esta data para horário de funcionamento e validade do orçamento.`
+        + (pedidosAbertos ? '' : '\nHoje é fim de semana: pedidos pelo WhatsApp fechados (siga a seção "Fim de semana: sem pedidos pelo WhatsApp").'),
     },
     ...(ragContext ? [{ role: 'system', content: ragContext }] : []),
     ...history,
@@ -517,7 +534,11 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
     else request.reasoning_effort = 'low';
 
     if (provider === 'openai') request.response_format = projeto.jsonSchema;
-    if (allowTools) request.tools = [PRODUCT_SEARCH_TOOL, ADD_CART_ITEM_TOOL, VIEW_CART_TOOL, CLEAR_CART_TOOL, REGISTER_CUSTOMER_DATA_TOOL, OFFERS_TOOL];
+    if (allowTools) {
+      request.tools = pedidosAbertos
+        ? [PRODUCT_SEARCH_TOOL, ADD_CART_ITEM_TOOL, VIEW_CART_TOOL, CLEAR_CART_TOOL, REGISTER_CUSTOMER_DATA_TOOL, OFFERS_TOOL]
+        : [PRODUCT_SEARCH_TOOL, OFFERS_TOOL];
+    }
 
     const response = await client.chat.completions.create(request);
     const choiceMessage = response.choices?.[0]?.message;
@@ -567,12 +588,21 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
     parsedReply.transferToHuman = true;
   }
 
+  // Trava do servidor: mesmo que a IA marque a confirmação (ex: carrinho
+  // montado na sexta e confirmado no sábado), nada é registrado no fim de semana.
+  if (!pedidosAbertos && (parsedReply.confirmarPedido || parsedReply.orcamento)) {
+    console.warn(`${prefix} [ia] confirmação/orçamento ignorado no fim de semana`);
+    parsedReply.confirmarPedido = false;
+    parsedReply.orcamento = null;
+  }
+
   console.log(`${prefix} [ia] resposta pronta | duraçãoMs=${Date.now() - startedAt} | caracteresSaída=${parsedReply.replyText.length} | transferir=${parsedReply.transferToHuman}`);
   return parsedReply;
 }
 
 module.exports = {
   generateReply,
+  aceitaPedidoHoje,
   transcribeAudio,
   analyzeImage,
 };

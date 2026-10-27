@@ -64,6 +64,82 @@ function palavrasEmComum(nome, termo) {
   return semApostrofo(termo).split(/\s+/).filter(Boolean).filter((palavra) => nomeComparavel.includes(palavra)).length;
 }
 
+// O grupo do produto no GestãoClick (nome_grupo: "Refrigerante",
+// "Energético", "Cerveja"...) separa categorias que o nome não separa: "2L"
+// traz refrigerante e energético juntos. Produto sem grupo cadastrado (~1/3
+// do catálogo em 2026-10-27) continua aparecendo, porque pode ser da
+// categoria pedida.
+function palavrasDaCategoria(texto) {
+  return normalizeForCompare(texto)
+    .split(/\s+/)
+    .filter((palavra) => palavra.length >= 3)
+    .map((palavra) => palavra.replace(/s$/, ''));
+}
+
+function grupoBate(produto, categoria) {
+  const grupo = palavrasDaCategoria(produto?.nome_grupo);
+  return palavrasDaCategoria(categoria).some((palavra) => grupo.includes(palavra));
+}
+
+// Se nenhum resultado é do grupo pedido (ex: a IA mandou "whisky" e o grupo
+// é "Destilados"), o filtro não vale: melhor mostrar a busca inteira do que
+// esconder tudo.
+function filtrarPorCategoria(produtos, categoria) {
+  if (!categoria || !produtos.some((produto) => grupoBate(produto, categoria))) return produtos;
+  // Os do grupo pedido vêm antes dos sem grupo, para não perderem as vagas do
+  // limite de resultados.
+  return [
+    ...produtos.filter((produto) => grupoBate(produto, categoria)),
+    ...produtos.filter((produto) => !produto?.nome_grupo),
+  ];
+}
+
+// O cliente escreve as marcas como fala ("cristal" para Crystal, "heiniken",
+// "budwiser", "smirnof") e a busca da API é substring literal. Para a busca
+// de reserva no catálogo inteiro, cada palavra vira uma forma "como se fala"
+// (y→i, k→c, w→v, ph→f, letras dobradas viram uma) e ainda aceita uma letra
+// diferente nas palavras de 5 letras ou mais.
+function formaFonetica(palavra) {
+  return semApostrofo(palavra)
+    .replace(/[^a-z0-9]/g, '')
+    .replace(/ph/g, 'f')
+    .replace(/th/g, 't')
+    .replace(/y/g, 'i')
+    .replace(/k/g, 'c')
+    .replace(/w/g, 'v')
+    .replace(/(.)\1+/g, '$1');
+}
+
+function distanciaEdicao(a, b) {
+  const anterior = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = anterior[0];
+    anterior[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const acima = anterior[j];
+      anterior[j] = Math.min(anterior[j] + 1, anterior[j - 1] + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diagonal = acima;
+    }
+  }
+  return anterior[b.length];
+}
+
+function palavraParecida(palavraTermo, palavrasNome) {
+  const termo = formaFonetica(palavraTermo);
+  if (!termo) return true;
+  return palavrasNome.some((palavra) => {
+    const nome = formaFonetica(palavra);
+    if (nome.includes(termo)) return true;
+    return termo.length >= 5 && distanciaEdicao(termo, nome) <= 1;
+  });
+}
+
+function nomeParecido(nome, termo) {
+  const palavrasNome = String(nome || '').split(/[\s'’‘`´]+/).filter(Boolean);
+  const palavrasTermo = String(termo || '').split(/\s+/).filter(Boolean);
+  return palavrasTermo.length > 0 && palavrasTermo.every((palavra) => palavraParecida(palavra, palavrasNome));
+}
+
 function isProductsApiConfigured() {
   return Boolean(env.gestaoClickAccessToken && env.gestaoClickSecretToken);
 }
@@ -95,6 +171,7 @@ function normalizeProduto(produto) {
     id: produto?.id,
     nome: produto?.nome,
     codigo: produto?.codigo_interno,
+    grupo: produto?.nome_grupo || null,
     ativo: produto?.ativo === '1',
     em_estoque: (Number(produto?.estoque) || 0) > 0,
     valor_venda: Number(produto?.valor_venda) || null,
@@ -117,7 +194,7 @@ function comEstoque(produtos) {
   return comEstoqueSemLimite(produtos).slice(0, MAX_RESULTADOS);
 }
 
-async function searchProducts({ termo, messageId = null }) {
+async function searchProducts({ termo, categoria = null, messageId = null }) {
   const prefix = flowPrefix(messageId);
 
   if (!isProductsApiConfigured()) {
@@ -125,16 +202,24 @@ async function searchProducts({ termo, messageId = null }) {
     return { consultaRealizada: false, motivo: 'catálogo indisponível no momento' };
   }
 
-  const termoLimpo = stripFillerWords(termo);
+  // A categoria já filtra pelo grupo; no nome ela quase nunca aparece
+  // ("energetico 2l" não bate com "Furioso Melancia 2L"), então sai do termo.
+  const palavrasCategoria = new Set(palavrasDaCategoria(categoria));
+  const semCategoria = String(termo).split(/\s+/)
+    .filter((palavra) => !palavrasDaCategoria(palavra).some((p) => palavrasCategoria.has(p)))
+    .join(' ');
+  const termoLimpo = stripFillerWords(semCategoria.trim() || termo);
   const tentativas = [...new Set([termoLimpo, termo.trim()])].filter(Boolean);
 
-  const buscarPorNome = async (nome, limite) => {
+  // Com categoria, busca a página inteira (100) antes de filtrar: "2L" sozinho
+  // passa de 30 produtos, e os do grupo pedido podem não estar nos primeiros.
+  const buscarPorNome = async (nome, limite = categoria ? 100 : null) => {
     const response = await axios.get(`${GESTAOCLICK_API_BASE}/produtos`, {
       params: { nome, ativo: 1, ...(limite ? { limite } : {}) },
       headers: buildHeaders(),
       timeout: 8000,
     });
-    return response.data?.data || [];
+    return filtrarPorCategoria(response.data?.data || [], categoria);
   };
 
   try {
@@ -164,6 +249,18 @@ async function searchProducts({ termo, messageId = null }) {
           ? { consultaRealizada: true, produtos }
           : { consultaRealizada: true, produtos: [], sem_estoque: true };
       }
+    }
+
+    // Grafia diferente da marca ("cristal" para Crystal): a API não acha
+    // nem por palavra, então compara com o catálogo inteiro tolerando a grafia.
+    const catalogo = filtrarPorCategoria(await catalogoEmCache(), categoria);
+    const porGrafia = catalogo.filter((produto) => nomeParecido(produto?.nome, termoLimpo));
+    if (porGrafia.length > 0) {
+      const produtos = comEstoque(porGrafia);
+      console.log(`${prefix} [produtos] consulta por grafia parecida | termo="${termoLimpo}" | resultados=${porGrafia.length} | com_estoque=${produtos.length}`);
+      return produtos.length > 0
+        ? { consultaRealizada: true, produtos }
+        : { consultaRealizada: true, produtos: [], sem_estoque: true };
     }
 
     // Nome diferente do cadastro (ex: "maçã verde" para "Jack Daniel's
@@ -203,10 +300,25 @@ async function listarCatalogoAtivo() {
   return produtos;
 }
 
+// A busca por grafia parecida varre o catálogo inteiro; o cache evita três
+// chamadas à API a cada erro de digitação. Estoque e preço podem ficar até
+// 5 minutos atrasados só nesse caminho de reserva.
+const CATALOGO_CACHE_MS = 5 * 60 * 1000;
+let catalogoCache = { produtos: null, expiraEm: 0 };
+
+async function catalogoEmCache() {
+  if (catalogoCache.produtos && Date.now() < catalogoCache.expiraEm) return catalogoCache.produtos;
+  const produtos = await listarCatalogoAtivo();
+  catalogoCache = { produtos, expiraEm: Date.now() + CATALOGO_CACHE_MS };
+  return produtos;
+}
+
 module.exports = {
   isProductsApiConfigured,
   searchProducts,
   listarCatalogoAtivo,
   normalizeProduto,
+  filtrarPorCategoria,
+  nomeParecido,
   valorPorFaixa,
 };

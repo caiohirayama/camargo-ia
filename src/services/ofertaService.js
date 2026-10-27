@@ -204,6 +204,93 @@ function montarOfertas(linhas, produtos, hoje, prefix = '') {
   });
 }
 
+// Pedido da loja: na mensagem de ofertas, a linha com vários sabores no mesmo
+// preço (Gin Invictus, Gin Eternity, Furioso 2L) vira um bloco só, "Gin
+// Invictus Sabores 900ml", em vez de um bloco por sabor. Os sabores vão
+// junto, fora do bloco, para a IA responder quando o cliente perguntar.
+function palavrasDoNome(nome) {
+  return String(nome || '').replace(/\s+/g, ' ').trim().split(' ');
+}
+
+function chavePalavra(palavra) {
+  return String(palavra || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+// Separa pelo começo do nome, uma palavra por vez: o grupo de sabores é o
+// conjunto com as mesmas primeiras palavras que diverge todo na palavra
+// seguinte (o sabor). Marcas diferentes divergem já na primeira e ficam soltas.
+function separarPorPrefixo(ofertas, nivel = 0) {
+  if (nivel > 8) return ofertas.map((oferta) => ({ ofertas: [oferta] }));
+  const porPalavra = new Map();
+  ofertas.forEach((oferta) => {
+    const chave = chavePalavra(palavrasDoNome(oferta.nome)[nivel]);
+    porPalavra.set(chave, [...(porPalavra.get(chave) || []), oferta]);
+  });
+
+  return [...porPalavra.values()].flatMap((grupo) => {
+    if (grupo.length === 1) return [{ ofertas: grupo }];
+    const seguintes = new Set(grupo.map((oferta) => chavePalavra(palavrasDoNome(oferta.nome)[nivel + 1])));
+    return seguintes.size === grupo.length
+      ? [{ ofertas: grupo, palavrasPrefixo: nivel + 1 }]
+      : separarPorPrefixo(grupo, nivel + 1);
+  });
+}
+
+function montarGrupoSabores(ofertas, palavrasPrefixo) {
+  const nomes = ofertas.map((oferta) => palavrasDoNome(oferta.nome));
+  let palavrasSufixo = 0;
+  while (nomes.every((palavras) => palavras.length - palavrasSufixo - 1 >= palavrasPrefixo
+    && chavePalavra(palavras[palavras.length - palavrasSufixo - 1]) === chavePalavra(nomes[0][nomes[0].length - palavrasSufixo - 1]))) {
+    palavrasSufixo += 1;
+  }
+  const sabores = nomes.map((palavras) => palavras.slice(palavrasPrefixo, palavras.length - palavrasSufixo).join(' '));
+  // Sem sabor no meio (ex: "Corona Long" e "Corona Zero Long") não é linha de
+  // sabores: cada produto fica no seu bloco.
+  if (sabores.some((sabor) => !sabor)) return null;
+
+  const [primeira] = ofertas;
+  const prefixo = nomes[0].slice(0, palavrasPrefixo).join(' ');
+  const sufixo = nomes[0].slice(nomes[0].length - palavrasSufixo).join(' ');
+  const nome = [prefixo, 'Sabores', sufixo].filter(Boolean).join(' ');
+  return {
+    nome,
+    sabores,
+    produtos: ofertas.map((oferta) => ({ id: oferta.id, nome: oferta.nome, variacao_id: oferta.variacao_id })),
+    valor_oferta: primeira.valor_oferta,
+    unidades_por_embalagem: primeira.unidades_por_embalagem,
+    valor_oferta_unidade: primeira.valor_oferta_unidade,
+    quantidade_minima: primeira.quantidade_minima,
+    valida_ate: primeira.valida_ate,
+    bloco_mensagem: montarBlocoOferta({
+      nome,
+      valorOferta: primeira.valor_oferta,
+      unidades: primeira.unidades_por_embalagem,
+      valorUnidade: primeira.valor_oferta_unidade,
+      quantidadeMinima: primeira.quantidade_minima,
+      validaAte: primeira.valida_ate,
+    }),
+  };
+}
+
+// Só agrupa ofertas com as mesmas condições (preço, mínimo, validade e
+// embalagem), mantendo a ordem da planilha pela primeira de cada grupo.
+function agruparSabores(ofertas) {
+  const porCondicao = new Map();
+  ofertas.forEach((oferta) => {
+    const chave = [oferta.valor_oferta, oferta.quantidade_minima, oferta.valida_ate, oferta.unidades_por_embalagem].join('|');
+    porCondicao.set(chave, [...(porCondicao.get(chave) || []), oferta]);
+  });
+
+  const substituta = new Map();
+  [...porCondicao.values()].forEach((mesmaCondicao) => {
+    separarPorPrefixo(mesmaCondicao).forEach(({ ofertas: grupo, palavrasPrefixo }) => {
+      const agrupada = palavrasPrefixo ? montarGrupoSabores(grupo, palavrasPrefixo) : null;
+      grupo.forEach((oferta, indice) => substituta.set(oferta, agrupada ? (indice === 0 ? agrupada : null) : oferta));
+    });
+  });
+  return ofertas.map((oferta) => substituta.get(oferta)).filter(Boolean);
+}
+
 async function listarOfertasVigentes({ messageId = null } = {}) {
   const prefix = flowPrefix(messageId);
   // Planilha não configurada é escolha de ambiente, não falha: responde "sem
@@ -239,4 +326,5 @@ module.exports = {
   parseValor,
   unidadesPorEmbalagem,
   montarOfertas,
+  agruparSabores,
 };

@@ -141,3 +141,31 @@ test('troca um JWT assinado com a chave da conta de serviço por access token', 
     axios.get = originalGet;
   }
 });
+
+test('agrupa sabores da mesma linha e mesmas condições num bloco só', () => {
+  const oferta = (id, nome, valor) => ({ id, nome, variacao_id: `v${id}`, valor_oferta: valor, quantidade_minima: 6, valida_ate: null, unidades_por_embalagem: null, valor_oferta_unidade: null, bloco_mensagem: `🔥 ${nome}` });
+  const agrupadas = ofertaService.agruparSabores([
+    oferta(1, 'Gin Invictus Melancia 900ml', 10.9),
+    oferta(2, 'Brahma 300ml CX/24', 55),
+    oferta(3, 'Gin Invictus Morango c/ pêssego 900ml', 10.9),
+    oferta(4, 'Gin Eternity Sevilla 900ml', 15.9),
+    oferta(5, 'Skol 300ml CX/24', 55),
+    oferta(6, 'Gin Eternity  Strawberry 900ml', 15.9),
+    oferta(7, 'Gin Invictus Tropical 900ml', 12.9),
+    oferta(8, 'Corona Long 330ml CX/24', 143.9),
+    oferta(9, 'Corona Zero Long 330ml CX/24', 143.9),
+  ]);
+
+  assert.deepEqual(agrupadas.map((item) => item.nome), [
+    'Gin Invictus Sabores 900ml',
+    'Brahma 300ml CX/24',
+    'Gin Eternity Sabores 900ml',
+    'Skol 300ml CX/24',
+    'Gin Invictus Tropical 900ml',
+    'Corona Long 330ml CX/24',
+    'Corona Zero Long 330ml CX/24',
+  ]);
+  assert.deepEqual(agrupadas[0].sabores, ['Melancia', 'Morango c/ pêssego']);
+  assert.deepEqual(agrupadas[0].produtos.map((produto) => produto.id), [1, 3]);
+  assert.equal(agrupadas[0].bloco_mensagem, '🔥 Gin Invictus Sabores 900ml\n💰 R$ 10,90\n📦 A partir de 6 unidades');
+});
