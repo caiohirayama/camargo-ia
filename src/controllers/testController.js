@@ -1,10 +1,10 @@
-const evolutionService = require('../services/evolutionService');
+const whatsappService = require('../services/whatsappService');
 const ragService = require('../services/ragService');
 const aiService = require('../services/aiService');
 
 async function setWebhook(req, res) {
   try {
-    const result = await evolutionService.setWebhook();
+    const result = await whatsappService.setWebhook();
     return res.status(200).json({ ok: true, data: result.data });
   } catch (error) {
     return res.status(500).json({
@@ -18,7 +18,7 @@ async function sendTest(req, res) {
   try {
     const { remoteJid, text } = req.body || {};
 
-    await evolutionService.sendText({
+    await whatsappService.sendText({
       remoteJid,
       text: text || 'Mensagem de teste enviada com sucesso.',
     });

@@ -1,7 +1,8 @@
 const { parseIncomingPayload } = require('../utils/messageParser');
+const { parseWahaPayload } = require('../utils/wahaParser');
 const { containsInappropriateContent, getModerationReply } = require('../utils/moderation');
 const aiService = require('../services/aiService');
-const evolutionService = require('../services/evolutionService');
+const whatsappService = require('../services/whatsappService');
 const conversationLockService = require('../services/conversationLockService');
 const customerService = require('../services/customerService');
 const r2Service = require('../services/r2Service');
@@ -139,7 +140,7 @@ async function processPendingConversation(instanceName, sender, pendingMessages)
 
   if (containsInappropriateContent(combinedText)) {
     console.log(`${prefix} [moderação] conteúdo bloqueado; enviando resposta segura`);
-    await evolutionService.sendText({
+    await whatsappService.sendText({
       instanceName,
       remoteJid: sender,
       text: getModerationReply(),
@@ -195,9 +196,10 @@ async function handleOutgoingEvent(parsed) {
   // A própria IA mandando mensagem (via /message/sendText/:instance) também gera um evento fromMe
   // idêntico ao de um humano mandando manualmente pelo celular conectado. Se foi a
   // IA quem mandou, não é "atendente assumindo a conversa" — e o histórico já foi
-  // salvo em evolutionService.sendText no momento do envio (não depende desse eco,
+  // salvo em whatsappService.sendText no momento do envio (não depende desse eco,
   // que pode resolver o sender/JID errado e atribuir a mensagem ao cliente errado).
-  if (evolutionService.wasSentByAi({ instanceName: parsed.instanceName, messageId: parsed.messageId })) {
+  // No WAHA o próprio eco já diz se veio da API (sentByApi).
+  if (parsed.sentByApi || whatsappService.wasSentByAi({ instanceName: parsed.instanceName, messageId: parsed.messageId })) {
     console.log(`${flowPrefix(parsed.messageId)} [webhook] eco da própria IA confirmado e ignorado`);
     return;
   }
@@ -281,7 +283,7 @@ async function handleIncomingEvent(parsed) {
     // Mídias persistidas recebem somente a URL confirmada pelo R2.
     mediaUrl = null;
     console.log(`${flowPrefix(parsed.messageId)} [mídia] iniciando download | tipo=${parsed.contentType}`);
-    const media = await evolutionService.downloadMedia(parsed.instanceName, parsed.rawData);
+    const media = await whatsappService.downloadMedia(parsed.instanceName, parsed.rawData);
     if (media?.base64) {
       try {
         const uploadedUrl = await r2Service.uploadMedia({
@@ -369,6 +371,9 @@ async function handleIncomingEvent(parsed) {
 }
 
 async function handleEvolutionWebhook(req, res) {
+  if (env.whatsappProvider !== 'evolution') {
+    return res.status(404).json({ ok: false, error: 'Provedor Evolution API inativo.' });
+  }
   try {
     const key = req.body?.data?.key || {};
     console.log(`${flowPrefix(key.id)} [webhook] recebido | evento=${req.body?.event || req.body?.type || 'desconhecido'} | instância=${req.body?.instance || 'ausente'} | fromMe=${Boolean(key.fromMe)}`);
@@ -423,8 +428,42 @@ function getWebhookMessageRoute(parsed) {
   return parsed.fromMe ? 'outgoing' : 'incoming';
 }
 
+async function handleWahaWebhook(req, res) {
+  if (env.whatsappProvider !== 'waha') {
+    return res.status(404).json({ ok: false, error: 'Provedor WAHA inativo.' });
+  }
+  const messageId = req.body?.payload?.id;
+  console.log(`${flowPrefix(messageId)} [webhook] recebido | evento=${req.body?.event || 'desconhecido'} | sessão=${req.body?.session || 'ausente'} | fromMe=${Boolean(req.body?.payload?.fromMe)}`);
+  res.status(200).json({ ok: true });
+  setImmediate(async () => {
+    try {
+      await processWahaWebhookBody(req.body);
+    } catch (error) {
+      console.error(`${flowPrefix(messageId)} [webhook] erro no processamento assíncrono:`, errorSummary(error));
+    }
+  });
+}
+
+async function processWahaWebhookBody(body) {
+  const parsed = parseWahaPayload(body);
+  // Contato só com LID: tenta o telefone real para casar com o cadastro
+  // (Bot.Cliente/GestãoClick); sem resposta segue com o LID, como na Evolution.
+  if (parsed.lidSender && parsed.instanceName === env.instanceName && !parsed.isGroup) {
+    try {
+      const phoneJid = await whatsappService.resolveLid(parsed.lidSender);
+      if (phoneJid) parsed.sender = phoneJid;
+    } catch (error) {
+      console.warn(`${flowPrefix(parsed.messageId)} [waha] LID sem telefone resolvido:`, errorSummary(error));
+    }
+  }
+  await processParsedWebhook(parsed);
+}
+
 async function processEvolutionWebhookBody(body) {
-  const parsed = parseIncomingPayload(body);
+  await processParsedWebhook(parseIncomingPayload(body));
+}
+
+async function processParsedWebhook(parsed) {
   const prefix = flowPrefix(parsed.messageId);
 
   if (parsed.instanceName !== env.instanceName) {
@@ -476,6 +515,7 @@ async function processEvolutionWebhookBody(body) {
 
 module.exports = {
   handleEvolutionWebhook,
+  handleWahaWebhook,
   getWebhookMessageRoute,
   isTestModeAllowed,
 };

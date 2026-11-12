@@ -1,5 +1,5 @@
 const env = require('../config/env');
-const evolutionService = require('./evolutionService');
+const whatsappService = require('./whatsappService');
 const telegramService = require('./telegramService');
 const { errorSummary } = require('../utils/logContext');
 
@@ -31,7 +31,7 @@ function grupoConfigurado() {
 
 async function enviarParaGrupo(text, contexto) {
   try {
-    await evolutionService.sendNotificationText({ remoteJid: env.whatsappNotificationGroupJid, text });
+    await whatsappService.sendNotificationText({ remoteJid: env.whatsappNotificationGroupJid, text });
   } catch (error) {
     console.error(`[notificacao] falha ao enviar ${contexto} para o grupo de WhatsApp:`, errorSummary(error));
   }

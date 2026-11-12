@@ -1,5 +1,5 @@
 const customerService = require('../../services/customerService');
-const evolutionService = require('../../services/evolutionService');
+const whatsappService = require('../../services/whatsappService');
 const notificationService = require('../../services/notificationService');
 const orcamentoService = require('../../services/orcamentoService');
 const cartService = require('../../services/cartService');
@@ -125,7 +125,7 @@ async function runTurn({ cliente, history = [], combinedText, instanceName, send
       console.log(`${flowPrefix(messageId)} [camargo] atendente assumiu durante o envio | sender=${maskJid(sender)} | bolhas restantes descartadas`);
       break;
     }
-    await evolutionService.sendText({
+    await whatsappService.sendText({
       instanceName,
       remoteJid: sender,
       text: chunk,

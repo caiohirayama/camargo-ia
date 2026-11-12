@@ -60,6 +60,12 @@ router.post(
   express.json({ limit: '2mb' }),
   webhookController.handleEvolutionWebhook,
 );
+router.post(
+  '/webhook/waha',
+  requireWebhookSecret,
+  express.json({ limit: '2mb' }),
+  webhookController.handleWahaWebhook,
+);
 router.use('/test', requireTestApiKey);
 router.use('/test', express.json({ limit: '2mb' }));
 router.post('/test/set-webhook', testController.setWebhook);

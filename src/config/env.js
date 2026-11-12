@@ -14,6 +14,10 @@ const env = {
   evolutionApiUrl: process.env.EVOLUTION_API_URL,
   evolutionApiKey: process.env.EVOLUTION_API_KEY,
   evolutionWebhookUrl: process.env.EVOLUTION_WEBHOOK_URL,
+  whatsappProvider: String(process.env.WHATSAPP_PROVIDER || 'evolution').trim().toLowerCase(),
+  wahaApiUrl: process.env.WAHA_API_URL,
+  wahaApiKey: process.env.WAHA_API_KEY,
+  wahaWebhookUrl: process.env.WAHA_WEBHOOK_URL,
   aiModel: process.env.AI_MODEL || 'gpt-5-mini',
   aiBaseUrl: process.env.AI_BASE_URL,
   openaiApiKey: process.env.OPENAI_API_KEY,
@@ -80,21 +84,29 @@ function validateUrl(name, value) {
 }
 
 env.validateInstanceConfig = function validateInstanceConfig() {
+  if (!['evolution', 'waha'].includes(env.whatsappProvider)) {
+    throw new Error('WHATSAPP_PROVIDER deve ser "evolution" ou "waha".');
+  }
+  const waha = env.whatsappProvider === 'waha';
   const required = {
     CAMARGO_INSTANCE_NAME: env.instanceName,
     CAMARGO_PHONE_NUMBER: env.botPhoneNumber,
-    EVOLUTION_API_URL: env.evolutionApiUrl,
-    EVOLUTION_API_KEY: env.evolutionApiKey,
+    ...(waha
+      ? { WAHA_API_URL: env.wahaApiUrl, WAHA_API_KEY: env.wahaApiKey }
+      : { EVOLUTION_API_URL: env.evolutionApiUrl, EVOLUTION_API_KEY: env.evolutionApiKey }),
     OPENAI_API_KEY: env.openaiApiKey,
     WEBHOOK_SECRET: env.webhookSecret,
     TEST_API_KEY: env.testApiKey,
   };
   const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
-  if (!env.evolutionWebhookUrl && !env.publicWebhookUrl) missing.push('EVOLUTION_WEBHOOK_URL');
+  const webhookName = waha ? 'WAHA_WEBHOOK_URL' : 'EVOLUTION_WEBHOOK_URL';
+  const webhookUrl = (waha ? env.wahaWebhookUrl : env.evolutionWebhookUrl) || env.publicWebhookUrl;
+  if (!webhookUrl) missing.push(webhookName);
   if (missing.length) throw new Error(`Variáveis obrigatórias ausentes: ${missing.join(', ')}.`);
 
-  validateUrl('EVOLUTION_API_URL', env.evolutionApiUrl);
-  validateUrl('EVOLUTION_WEBHOOK_URL', env.evolutionWebhookUrl || env.publicWebhookUrl);
+  if (waha) validateUrl('WAHA_API_URL', env.wahaApiUrl);
+  else validateUrl('EVOLUTION_API_URL', env.evolutionApiUrl);
+  validateUrl(webhookName, webhookUrl);
   if (env.aiBaseUrl) validateUrl('AI_BASE_URL', env.aiBaseUrl);
   const typingValues = [env.typingMinMs, env.typingMaxMs, env.typingPerCharMs];
   if (typingValues.some((value) => !Number.isFinite(value) || value <= 0)) {

@@ -30,6 +30,18 @@ Esta aplicação usa exclusivamente o contrato da Evolution API (Node.js/TypeScr
 
 O webhook usa o payload aninhado `webhook` da Evolution API 2.3.7 e é configurado para `MESSAGES_UPSERT` e `CONNECTION_UPDATE`, sem base64 embutido. As mídias são obtidas pelo endpoint da Evolution API e depois persistidas no Cloudflare R2.
 
+## WAHA (alternativa à Evolution API)
+
+Com `WHATSAPP_PROVIDER=waha` a aplicação fala com o [WAHA](https://waha.devlike.pro) em vez da Evolution API, com o mesmo fluxo (fila, pausa por atendente, mídia no R2, avisos no grupo). Configure `WAHA_API_URL` (no mesmo host: `http://127.0.0.1:3000`), `WAHA_API_KEY`, `WAHA_WEBHOOK_URL` (`https://<domínio>/webhook/waha`) e `CAMARGO_INSTANCE_NAME=default` (o WAHA Core só tem a sessão `default`).
+
+- Envio: `POST /api/startTyping` e `POST /api/sendText` (`chatId` `<número>@c.us`). O resto da aplicação continua gravando o JID como `@s.whatsapp.net`; a conversão fica em `wahaService`/`wahaParser`.
+- Webhook: eventos `message.any` (inclui mensagens enviadas pelo celular, que pausam a IA; o eco da própria IA vem com `source: "api"` e é ignorado) e `session.status` (`FAILED` dispara o alerta de queda no Telegram). O segredo vai no header `X-Webhook-Secret`.
+- `POST /test/set-webhook` lê a config da sessão e troca só os webhooks (`PUT /api/sessions/default`, que reinicia a sessão sem perder o pareamento).
+- Mídia: baixada de `/api/files/...` do próprio WAHA com `X-Api-Key` (a chave só vai para o host de `WAHA_API_URL`).
+- Contato só com LID: o telefone é resolvido por `GET /api/default/lids/{lid}`; sem resposta, segue com o LID.
+
+Só a rota do provedor ativo responde; a outra devolve 404.
+
 ## Configuração
 
 Copie `.env.example` para `.env` e informe as credenciais. A conexão pode ser configurada por uma única `DATABASE_URL` ou pelas variáveis `POSTGRES_*`.
