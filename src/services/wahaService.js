@@ -183,9 +183,15 @@ async function setWebhook(instanceName) {
   };
   if (env.webhookSecret) webhook.customHeaders = [{ name: 'X-Webhook-Secret', value: env.webhookSecret }];
 
+  // Grupos, status, canais e listas de transmissão nem viram evento (o app já
+  // os ignora); o envio para o grupo de avisos da equipe não é afetado.
   return client.put(`/api/sessions/${encodeURIComponent(session)}`, {
     name: session,
-    config: { ...config, webhooks: [webhook] },
+    config: {
+      ...config,
+      ignore: { status: true, groups: true, channels: true, broadcast: true },
+      webhooks: [webhook],
+    },
   });
 }
 

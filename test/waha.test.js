@@ -134,6 +134,7 @@ test('usa somente endpoints e payloads do WAHA', async (t) => {
   const put = calls.find(({ method }) => method === 'put');
   assert.equal(put.url, '/api/sessions/default');
   assert.equal(put.body.config.debug, false);
+  assert.deepEqual(put.body.config.ignore, { status: true, groups: true, channels: true, broadcast: true });
   assert.deepEqual(put.body.config.webhooks[0].events, ['message.any', 'session.status']);
   assert.equal(put.body.config.webhooks[0].url, 'https://app.example.com/webhook/waha');
   assert.deepEqual(put.body.config.webhooks[0].customHeaders, [{ name: 'X-Webhook-Secret', value: 'test-secret' }]);
