@@ -51,6 +51,33 @@ test('mensagem fromMe usa o chat em "to" e marca eco da API', () => {
   assert.equal(manual.sentByApi, false);
 });
 
+test('GOWS: chat @lid em "from" com telefone em Info.*Alt (payload real)', () => {
+  const info = (extra) => ({ Info: { Chat: '203448674975898@lid', IsGroup: false, SenderAlt: '', RecipientAlt: '', PushName: 'Cliente', ...extra } });
+  const sent = parseWahaPayload({
+    event: 'message.any',
+    session: 'default',
+    payload: {
+      id: 'true_203448674975898@lid_2A9F', from: '203448674975898@lid', to: null, fromMe: true, source: 'app', body: 'Oi',
+      _data: info({ IsFromMe: true, RecipientAlt: '5519996495500@s.whatsapp.net' }),
+    },
+  });
+  assert.equal(sent.sender, '5519996495500@s.whatsapp.net');
+  assert.equal(sent.lidSender, '203448674975898@lid');
+  assert.equal(getWebhookMessageRoute(sent), 'outgoing');
+
+  const received = parseWahaPayload({
+    event: 'message.any',
+    session: 'default',
+    payload: { id: 'false_x', from: '203448674975898@lid', to: null, fromMe: false, body: 'Olá', _data: info({ SenderAlt: '5519996495500@s.whatsapp.net' }) },
+  });
+  assert.equal(received.sender, '5519996495500@s.whatsapp.net');
+  assert.equal(received.senderName, 'Cliente');
+  assert.equal(getWebhookMessageRoute(received), 'incoming');
+
+  const semAlt = parseWahaPayload({ event: 'message.any', session: 'default', payload: { id: 'y', from: '203448674975898@lid', body: 'x', _data: info({}) } });
+  assert.equal(semAlt.sender, '203448674975898@lid');
+});
+
 test('mídia, grupo, LID, evento de sistema e session.status', () => {
   const audio = parseWahaPayload({
     event: 'message.any',

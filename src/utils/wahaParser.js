@@ -59,17 +59,24 @@ function extractSenderName(payload) {
 function parseWahaPayload(body) {
   const payload = body?.payload || {};
   const fromMe = Boolean(payload.fromMe);
-  // Em mensagem enviada pelo próprio número, "from" é o número da loja e o
-  // chat do cliente está em "to".
-  const chatId = fromMe ? payload.to : payload.from;
-  const sender = toAppJid(chatId);
+  // Em mensagem enviada pelo próprio número, WEBJS/NOWEB põem o chat do
+  // cliente em "to"; o GOWS manda "to: null" e o chat em "from".
+  const chatId = fromMe ? (payload.to || payload.from) : payload.from;
+  const chatJid = toAppJid(chatId);
+  // GOWS: chat em @lid traz o telefone em Info.SenderAlt (recebida) ou
+  // Info.RecipientAlt (enviada), já no formato @s.whatsapp.net.
+  const raw = payload._data || {};
+  const info = raw.Info || {};
+  const phoneAlt = toAppJid(fromMe ? info.RecipientAlt : info.SenderAlt);
+  const lidJid = chatJid?.endsWith('@lid') ? chatJid : null;
+  const sender = lidJid && phoneAlt?.endsWith('@s.whatsapp.net') ? phoneAlt : chatJid;
   const contentType = getContentType(payload);
   const isMessageEvent = String(body?.event || '').startsWith('message');
 
   return {
     instanceName: body?.session || null,
     sender: isMessageEvent ? sender : null,
-    lidSender: sender?.endsWith('@lid') ? sender : null,
+    lidSender: lidJid,
     fromMe,
     // source "api" = enviada por chamada à API (a própria IA), "app" = celular.
     sentByApi: fromMe && payload.source === 'api',

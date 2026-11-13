@@ -448,7 +448,7 @@ async function processWahaWebhookBody(body) {
   const parsed = parseWahaPayload(body);
   // Contato só com LID: tenta o telefone real para casar com o cadastro
   // (Bot.Cliente/GestãoClick); sem resposta segue com o LID, como na Evolution.
-  if (parsed.lidSender && parsed.instanceName === env.instanceName && !parsed.isGroup) {
+  if (parsed.lidSender && parsed.sender === parsed.lidSender && parsed.instanceName === env.instanceName && !parsed.isGroup) {
     try {
       const phoneJid = await whatsappService.resolveLid(parsed.lidSender);
       if (phoneJid) parsed.sender = phoneJid;
