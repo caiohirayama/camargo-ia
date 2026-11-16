@@ -489,6 +489,24 @@ function aceitaPedidoHoje(now = new Date()) {
   return diaSemana !== 'Sat' && diaSemana !== 'Sun';
 }
 
+// O LLM só recebia a data e dizia "estamos abertos até 13h" às 14h50 de sábado.
+// O servidor calcula se a loja está aberta agora; mesmos horários de rag/knowledge/hours.md.
+function statusLojaAgora(now = new Date()) {
+  const partes = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now).map((p) => [p.type, p.value]));
+  const hora = `${partes.hour}:${partes.minute}`;
+  const fechaAs = ['Sat', 'Sun'].includes(partes.weekday) ? 13 : 18;
+  const minutos = Number(partes.hour) * 60 + Number(partes.minute);
+  if (minutos < 9 * 60) return `Hora atual: ${hora}. A loja ainda não abriu hoje: abre às 09h e fecha às ${fechaAs}h.`;
+  if (minutos < fechaAs * 60) return `Hora atual: ${hora}. A loja está aberta agora, até as ${fechaAs}h.`;
+  return `Hora atual: ${hora}. A loja já fechou hoje (fechou às ${fechaAs}h). Nunca diga que está aberta hoje; informe o próximo dia de funcionamento.`;
+}
+
 async function generateReply({ history = [], userText = '', messageId = null, clienteId = null, cliente = null }) {
   const { client, model, provider } = getAiClientAndModel();
   const startedAt = Date.now();
@@ -510,7 +528,7 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
     { role: 'system', content: systemPrompt },
     {
       role: 'system',
-      content: `Data atual: ${getCurrentDate()} (${getCurrentWeekday()}), horário de Brasília. Use esta data para horário de funcionamento e validade do orçamento.`
+      content: `Data atual: ${getCurrentDate()} (${getCurrentWeekday()}), horário de Brasília. Use esta data para horário de funcionamento e validade do orçamento.\n${statusLojaAgora()}`
         + (pedidosAbertos ? '' : '\nHoje é fim de semana: pedidos pelo WhatsApp fechados (siga a seção "Fim de semana: sem pedidos pelo WhatsApp").'),
     },
     ...(ragContext ? [{ role: 'system', content: ragContext }] : []),
@@ -603,6 +621,7 @@ async function generateReply({ history = [], userText = '', messageId = null, cl
 module.exports = {
   generateReply,
   aceitaPedidoHoje,
+  statusLojaAgora,
   transcribeAudio,
   analyzeImage,
 };

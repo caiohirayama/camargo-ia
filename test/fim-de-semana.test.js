@@ -1,6 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { aceitaPedidoHoje } = require('../src/services/aiService');
+const { aceitaPedidoHoje, statusLojaAgora } = require('../src/services/aiService');
+
+test('status da loja agora considera a hora de Brasília', () => {
+  assert.match(statusLojaAgora(new Date('2026-11-14T14:51:00-03:00')), /14:51.*já fechou.*13h/); // sábado à tarde
+  assert.match(statusLojaAgora(new Date('2026-11-14T10:00:00-03:00')), /aberta agora, até as 13h/);
+  assert.match(statusLojaAgora(new Date('2026-11-13T14:51:00-03:00')), /aberta agora, até as 18h/); // sexta
+  assert.match(statusLojaAgora(new Date('2026-11-13T08:30:00-03:00')), /ainda não abriu/);
+  assert.match(statusLojaAgora(new Date('2026-11-13T18:00:00-03:00')), /já fechou.*18h/);
+});
 
 test('pedidos pelo WhatsApp só de segunda a sexta, no horário de Brasília', () => {
   assert.equal(aceitaPedidoHoje(new Date('2026-10-30T15:00:00-03:00')), true); // sexta
